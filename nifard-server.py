@@ -10,6 +10,23 @@ user_name = "postgres" # Имя пользователя базы
 user_password = "" # Пароль пользователя базы
 log_file = '/var/log/nifard/nifard-server.log'
 
+# Чтение файла конфигурации
+try:
+  if os.path.isfile('/etc/nifard/nifard-config'):
+    configfile = open('/etc/nifard/nifard-config')
+  else:
+    configfile = open('nifard-config')
+except IOError as error:
+  print(error)
+else:
+  values = []
+  for line in configfile:
+    param = line.partition('=')[::2]
+    if param[0].strip().isalpha() and param[1].strip().find('#') == -1:
+      values.append(param[0].strip())
+      values.append(param[1].strip())
+  print(values)
+
 # Обработчик сигналов завершения процесса
 def kill_signals(signum, frame):
   # Очистка правил и логирование
