@@ -4,11 +4,12 @@
 import os, psycopg2, threading, time, sys, signal
 
 exit = False # Завершение работы приложения
-oif = 'enp5s0' # Имя внешнего интерфейса (Internet)
 database_name = "nifard" # Имя базы данных
-user_name = "postgres" # Имя пользователя базы
-user_password = "" # Пароль пользователя базы
-log_file = '/var/log/nifard/nifard-server.log'
+config = [] # Список параметров файла конфигурации
+
+# Получение значения параметра конфигурации
+def config_get(key):
+  return config[config.index(key)+1]
 
 # Чтение файла конфигурации
 try:
@@ -19,20 +20,26 @@ try:
 except IOError as error:
   print(error)
 else:
-  values = []
   for line in configfile:
     param = line.partition('=')[::2]
     if param[0].strip().isalpha() and param[1].strip().find('#') == -1:
-      values.append(param[0].strip())
-      values.append(param[1].strip())
-  print(values)
+      config.append(param[0].strip())
+      config.append(param[1].strip())
+
+# Подготовка лог файла
+if os.path.isfile(config_get('LogFile')):
+  logfile = open(config_get('LogFile'),'a')
+else:
+  logdir = os.path.dirname(config_get('LogFile'))
+  if not os.path.exists(logdir):
+    os.makedirs(logdir)
+  logfile = open(config_get('LogFile'),'a')
 
 # Обработчик сигналов завершения процесса
 def kill_signals(signum, frame):
   # Очистка правил и логирование
   os.system('nft flush ruleset')
-  with open(log_file, 'a') as log:
-    log.write('Server Stopped\n')
+  logfile.write('Server Stopped\n')
   global exit
   exit = True
 signal.signal(signal.SIGINT, kill_signals)
@@ -43,7 +50,7 @@ def db_nft():
   # Connection to the database
   # Подключение к базе
   try:
-    conn_pg = psycopg2.connect(database=database_name, user=user_name, password=user_password)
+    conn_pg = psycopg2.connect(database=database_name, user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
   except psycopg2.OperationalError as error:
     print(format(error))
     sys.exit(1)
@@ -71,7 +78,7 @@ def db_nft():
         # Проверка типа доступа
         if access.find('always') != -1 or access.find('ad') !=-1:
           # Создание строки доступа для выбранного ip
-          command = command + 'nft add rule nat postrouting ip saddr '+ip+' oif '+oif+' masquerade\n'
+          command = command + 'nft add rule nat postrouting ip saddr '+ip+' oif '+config_get('InternetInterface')+' masquerade\n'
     # Очистка таблицы nat и добавление всех правил
     os.system('nft flush table nat')
     os.system(command)
@@ -83,8 +90,7 @@ def db_nft():
 # Running threads
 # Запуск потоков
 if __name__ =='__main__':
-  with open(log_file, 'a') as log:
-    log.write('Server Started\n')
+  logfile.write('Server Started\n')
   thread_db_nft = threading.Thread(target=db_nft, name="db_nft")
   thread_db_nft.start()
   thread_db_nft.join()
