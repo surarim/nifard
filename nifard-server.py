@@ -87,8 +87,8 @@ def db_nft():
           # Создание строки доступа для выбранного ip
           command = command + 'nft add rule nat postrouting ip saddr '+ip+' oif '+config_get('InternetInterface')+' masquerade\n'
     # Очистка таблицы nat и добавление всех правил
-    os.system('nft flush table nat')
-    os.system(command)
+    subprocess.call('nft flush table nat')
+    subprocess.call(command)
     # Закрытие курсора и задержка выполнения
     cursor.close()
     time.sleep(1)
