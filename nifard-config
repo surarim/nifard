@@ -4,7 +4,7 @@
 InternetInterface = enp5s0
 
 # Имя пользователя базы данных
-DatabaseUserName = "postgres"
+DatabaseUserName = postgres
 
 # Пароль пользователя базы данных
 DatabasePassword = 123456
@@ -16,7 +16,7 @@ ADRealm = domain.local
 ADServer = dc.domain.local
 
 # Имя пользователя Active Directory
-ADUserName = "nifard"
+ADUserName = nifard
 
 # Пароль пользователя Active Directory
 ADUserPassword = 123456

@@ -1,10 +1,9 @@
 #!/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import os, psycopg2, threading, time, sys, signal
+import os, psycopg2, threading, time, sys, signal, subprocess
 
 exit = False # Завершение работы приложения
-database_name = "nifard" # Имя базы данных
 config = [] # Список параметров файла конфигурации
 
 # Получение значения параметра конфигурации
@@ -50,14 +49,18 @@ def db_nft():
   # Connection to the database
   # Подключение к базе
   try:
-    conn_pg = psycopg2.connect(database=database_name, user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
-  except psycopg2.OperationalError as error:
-    print(format(error))
+    conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
+  except psycopg2.DatabaseError as error:
+    print(error)
     sys.exit(1)
   # Очистка правил, создание таблицы nat и цепочки postrouting
-  os.system('nft flush ruleset')
-  os.system('nft add table nat')
-  os.system('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }')
+  try:
+    subprocess.call('nft flush ruleset')
+  except OSError as error:
+    print(error)
+    sys.exit(1)
+  subprocess.call('nft add table nat')
+  subprocess.call('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }')
   # Цикл чтения таблицы
   while True:
     if exit:
@@ -65,7 +68,11 @@ def db_nft():
     command = ''
     # Чтение из таблицы базы данных
     cursor = conn_pg.cursor()
-    cursor.execute("select * from users;")
+    try:
+      cursor.execute("select * from users;")
+    except psycopg2.DatabaseError as error:
+      print(error)
+      sys.exit(1)
     conn_pg.commit()
     rows = cursor.fetchall()
     for row in rows:
