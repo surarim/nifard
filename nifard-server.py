@@ -55,7 +55,6 @@ def db_nft():
     sys.exit(1)
   # Очистка правил, создание таблицы nat и цепочки postrouting
   try:
-    #os.system('nft flush ruleset')
     subprocess.call('nft flush ruleset', shell=True)
   except OSError as error:
     print(error)
@@ -73,6 +72,7 @@ def db_nft():
       cursor.execute("select * from users;")
     except psycopg2.DatabaseError as error:
       print(error)
+      subprocess.call('nft flush ruleset', shell=True)
       sys.exit(1)
     conn_pg.commit()
     rows = cursor.fetchall()
