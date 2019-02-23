@@ -37,7 +37,7 @@ else:
 # Обработчик сигналов завершения процесса
 def kill_signals(signum, frame):
   # Очистка правил и логирование
-  os.system('nft flush ruleset')
+  subprocess.call('nft flush ruleset', shell=True)
   logfile.write('Server Stopped\n')
   global exit
   exit = True
@@ -55,12 +55,13 @@ def db_nft():
     sys.exit(1)
   # Очистка правил, создание таблицы nat и цепочки postrouting
   try:
-    subprocess.call('nft flush ruleset')
+    #os.system('nft flush ruleset')
+    subprocess.call('nft flush ruleset', shell=True)
   except OSError as error:
     print(error)
     sys.exit(1)
-  subprocess.call('nft add table nat')
-  subprocess.call('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }')
+  subprocess.call('nft add table nat', shell=True)
+  subprocess.call('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }', shell=True)
   # Цикл чтения таблицы
   while True:
     if exit:
@@ -87,8 +88,8 @@ def db_nft():
           # Создание строки доступа для выбранного ip
           command = command + 'nft add rule nat postrouting ip saddr '+ip+' oif '+config_get('InternetInterface')+' masquerade\n'
     # Очистка таблицы nat и добавление всех правил
-    subprocess.call('nft flush table nat')
-    subprocess.call(command)
+    subprocess.call('nft flush table nat', shell=True)
+    subprocess.call(command, shell=True)
     # Закрытие курсора и задержка выполнения
     cursor.close()
     time.sleep(1)
