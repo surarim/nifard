@@ -9,9 +9,6 @@ DatabaseUserName = postgres
 # Пароль пользователя базы данных
 DatabasePassword = 123456
 
-# Имя домена Active Directory
-ADRealm = domain.local
-
 # Имя контроллера домена Active Directory
 ADServer = dc.domain.local
 
@@ -21,8 +18,11 @@ ADUserName = nifard
 # Пароль пользователя Active Directory
 ADUserPassword = 123456
 
-# Имя группы Active Directory для доступа в Интернет
-ADInternetGroup = internet_nolimit
+# Маска ip адресов которым предоставляется доступ в Интернет
+ADUserIPMask = 192.168.
+
+# Имя групп Active Directory для доступа в Интернет
+ADInternetGroup = internet_128,internet_256,internet_512,internet_1024,internet_2048,internet_nolimit
 
 # Путь до log файла
 LogFile = /var/log/nifard/nifard-server.log

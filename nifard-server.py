@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os, psycopg2, threading, time, sys, signal, subprocess
+from pypsrp.client import Client
 
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
@@ -82,7 +83,7 @@ def db_nft():
       speed = row[2] # Скорость
       access = row[3] # Тип доступа
       # Проверка ip адреса на валидность
-      if ip.count('.') == 3 and ip.find('192.168.') != -1:
+      if ip.count('.') == 3 and ip.find(config_get('ADUserIPMask')) != -1:
         # Проверка типа доступа
         if access.find('always') != -1 or access.find('ad') !=-1:
           # Создание строки доступа для выбранного ip
@@ -92,13 +93,69 @@ def db_nft():
     subprocess.call(command, shell=True)
     # Закрытие курсора и задержка выполнения
     cursor.close()
-    time.sleep(1)
+    time.sleep(5)
   conn_pg.close()
+
+# Поток чтения журнала security и получения связки: ip пользователь
+# Затем добавление новых записей в базу данных
+def track_events():
+  while True:
+    if exit:
+      break
+    # Подключение в серверу и получение журнала security со всеми фильтрами
+    client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
+    script = """Get-EventLog -LogName security -ComputerName """+config_get('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}} -Unique"""
+    result, streams, had_error = client.execute_ps(script)
+    # Connection to the database
+    # Подключение к базе
+    try:
+      conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
+    except psycopg2.DatabaseError as error:
+      print(error)
+      sys.exit(1)
+    # Выбор результата только соответствующего маске
+    for line in result.splitlines():
+      if line.find(config_get('ADUserIPMask')) != -1:
+        print('New ip:'+line.split()[0]+"  user:"+line.split()[1])
+        # Чтение из таблицы базы данных
+        cursor = conn_pg.cursor()
+        try:
+          cursor.execute("select ip,username from users where ip = %s;", (line.split()[0],))
+        except psycopg2.DatabaseError as error:
+          print(error)
+          sys.exit(1)
+        conn_pg.commit()
+        rows = cursor.fetchall()
+        # Если ip нет в базе, добавляем
+        if not rows:
+          try:
+            cursor.execute("insert into users values (%s, %s, 'internet_128', 'ad');", (line.split()[0],line.split()[1],))
+          except psycopg2.DatabaseError as error:
+            print(error)
+            sys.exit(1)
+          print('Insert ip:'+line.split()[0]+"  user:"+line.split()[1])
+          conn_pg.commit()
+        # Если ip адрес есть, но отличается имя пользователя, меняем в базе
+        if rows and rows[0][1] != line.split()[1]:
+          try:
+            cursor.execute("update users set username = %s where ip = %s;", (line.split()[1],line.split()[0],))
+          except psycopg2.DatabaseError as error:
+            print(error)
+            sys.exit(1)
+          print('Update ip:'+line.split()[0]+"  user:"+line.split()[1])
+          conn_pg.commit()
+        cursor.close()
+    # Задержка выполнения
+    conn_pg.close()
+    time.sleep(5)
 
 # Running threads
 # Запуск потоков
 if __name__ =='__main__':
   logfile.write('Server Started\n')
   thread_db_nft = threading.Thread(target=db_nft, name="db_nft")
+  thread_track_events = threading.Thread(target=track_events, name="track_events")
   thread_db_nft.start()
+  thread_track_events.start()
   thread_db_nft.join()
+  thread_track_events.join()
