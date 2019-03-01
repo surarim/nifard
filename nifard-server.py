@@ -27,26 +27,25 @@ else:
       config.append(param[1].strip())
 
 # Подготовка лог файла
-if os.path.isfile(config_get('LogFile')):
-  logfile = open(config_get('LogFile'),'a')
-else:
+if not os.path.isfile(config_get('LogFile')):
   logdir = os.path.dirname(config_get('LogFile'))
   if not os.path.exists(logdir):
     os.makedirs(logdir)
-  logfile = open(config_get('LogFile'),'a')
+  open(config_get('LogFile'),'a').close()
 
 # Обработчик сигналов завершения процесса
 def kill_signals(signum, frame):
-  # Очистка правил и логирование
-  subprocess.call('nft flush ruleset', shell=True)
-  logfile.write('Server Stopped\n')
+  # Установка завершения работы
   global exit
   exit = True
 signal.signal(signal.SIGINT, kill_signals)
 signal.signal(signal.SIGTERM, kill_signals)
 
-# Поток чтения базы и изменений в nftables
-def db_nft():
+# Поток изменений в nftables
+def setup_nftables():
+  # Запись в лог файл
+  with open(config_get('LogFile'),'a') as logfile:
+    logfile.write('Thread setup_nftables running\n')
   # Connection to the database
   # Подключение к базе
   try:
@@ -63,9 +62,8 @@ def db_nft():
   subprocess.call('nft add table nat', shell=True)
   subprocess.call('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }', shell=True)
   # Цикл чтения таблицы
-  while True:
-    if exit:
-      break
+  while not exit:
+    time.sleep(1)
     command = ''
     # Чтение из таблицы базы данных
     cursor = conn_pg.cursor()
@@ -93,15 +91,21 @@ def db_nft():
     subprocess.call(command, shell=True)
     # Закрытие курсора и задержка выполнения
     cursor.close()
-    time.sleep(5)
   conn_pg.close()
+  subprocess.call('nft flush ruleset', shell=True)
+  # Запись в лог файл
+  with open(config_get('LogFile'),'a') as logfile:
+    logfile.write('Thread setup_nftables stopped\n')
 
 # Поток чтения журнала security и получения связки: ip пользователь
 # Затем добавление новых записей в базу данных
 def track_events():
-  while True:
-    if exit:
-      break
+  # Запись в лог файл
+  with open(config_get('LogFile'),'a') as logfile:
+    logfile.write('Thread track_events running\n')
+  while not exit:
+    # Завершение потока или ожидание
+    time.sleep(1)
     # Подключение в серверу и получение журнала security со всеми фильтрами
     client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
     script = """Get-EventLog -LogName security -ComputerName """+config_get('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}} -Unique"""
@@ -116,7 +120,9 @@ def track_events():
     # Выбор результата только соответствующего маске
     for line in result.splitlines():
       if line.find(config_get('ADUserIPMask')) != -1:
-        print('New ip:'+line.split()[0]+"  user:"+line.split()[1])
+        # Запись в лог файл
+        with open(config_get('LogFile'),'a') as logfile:
+          logfile.write('New ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
         # Чтение из таблицы базы данных
         cursor = conn_pg.cursor()
         try:
@@ -133,7 +139,9 @@ def track_events():
           except psycopg2.DatabaseError as error:
             print(error)
             sys.exit(1)
-          print('Insert ip:'+line.split()[0]+"  user:"+line.split()[1])
+          # Запись в лог файл
+          with open(config_get('LogFile'),'a') as logfile:
+            logfile.write('Insert ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
           conn_pg.commit()
         # Если ip адрес есть, но отличается имя пользователя, меняем в базе
         if rows and rows[0][1] != line.split()[1]:
@@ -142,20 +150,22 @@ def track_events():
           except psycopg2.DatabaseError as error:
             print(error)
             sys.exit(1)
-          print('Update ip:'+line.split()[0]+"  user:"+line.split()[1])
+          # Запись в лог файл
+          with open(config_get('LogFile'),'a') as logfile:
+            logfile.write('Update ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
           conn_pg.commit()
         cursor.close()
-    # Задержка выполнения
     conn_pg.close()
-    time.sleep(5)
+  # Запись в лог файл
+  with open(config_get('LogFile'),'a') as logfile:
+    logfile.write('Thread track_events stopped\n')
 
 # Running threads
 # Запуск потоков
 if __name__ =='__main__':
-  logfile.write('Server Started\n')
-  thread_db_nft = threading.Thread(target=db_nft, name="db_nft")
+  thread_setup_nftables = threading.Thread(target=setup_nftables, name="setup_nftables")
   thread_track_events = threading.Thread(target=track_events, name="track_events")
-  thread_db_nft.start()
+  thread_setup_nftables.start()
   thread_track_events.start()
-  thread_db_nft.join()
+  thread_setup_nftables.join()
   thread_track_events.join()
