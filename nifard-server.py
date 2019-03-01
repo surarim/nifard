@@ -63,7 +63,6 @@ def setup_nftables():
   subprocess.call('nft add chain nat postrouting { type nat hook postrouting priority 100 \; }', shell=True)
   # Цикл чтения таблицы
   while not exit:
-    time.sleep(1)
     command = ''
     # Чтение из таблицы базы данных
     cursor = conn_pg.cursor()
@@ -91,6 +90,11 @@ def setup_nftables():
     subprocess.call(command, shell=True)
     # Закрытие курсора и задержка выполнения
     cursor.close()
+    # Ожидание потока
+    for tick in range(5):
+      time.sleep(1)
+      if exit:
+        break
   conn_pg.close()
   subprocess.call('nft flush ruleset', shell=True)
   # Запись в лог файл
@@ -104,8 +108,6 @@ def track_events():
   with open(config_get('LogFile'),'a') as logfile:
     logfile.write('Thread track_events running\n')
   while not exit:
-    # Завершение потока или ожидание
-    time.sleep(1)
     # Подключение в серверу и получение журнала security со всеми фильтрами
     client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
     script = """Get-EventLog -LogName security -ComputerName """+config_get('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}} -Unique"""
@@ -156,6 +158,11 @@ def track_events():
           conn_pg.commit()
         cursor.close()
     conn_pg.close()
+    # Ожидание потока
+    for tick in range(5):
+      time.sleep(1)
+      if exit:
+        break
   # Запись в лог файл
   with open(config_get('LogFile'),'a') as logfile:
     logfile.write('Thread track_events stopped\n')
