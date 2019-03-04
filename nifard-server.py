@@ -119,42 +119,48 @@ def track_events():
     except psycopg2.DatabaseError as error:
       print(error)
       sys.exit(1)
-    # Выбор результата только соответствующего маске
     for line in result.splitlines():
+      # Выбор ip адреса только соответствующего маске ADUserIPMask
       if line.find(config_get('ADUserIPMask')) != -1:
+        # Получение группы для текущего пользователя (фильтрация по internet)
+        script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet*'"""
+        speed, streams, had_error = client.execute_ps(script)
+        # Проверка на отсутствие группы скорости
+        if not speed:
+          speed = 'no'
         # Запись в лог файл
         with open(config_get('LogFile'),'a') as logfile:
-          logfile.write('New ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
-        # Чтение из таблицы базы данных
+          logfile.write('New ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
+        # Поиск в базе выбранного ip адреса
         cursor = conn_pg.cursor()
         try:
-          cursor.execute("select ip,username from users where ip = %s;", (line.split()[0],))
+          cursor.execute("select ip,username,speed from users where ip = %s;", (line.split()[0],))
         except psycopg2.DatabaseError as error:
           print(error)
           sys.exit(1)
         conn_pg.commit()
         rows = cursor.fetchall()
-        # Если ip нет в базе, добавляем
+        # Если ip адреса нет в базе, добавляем
         if not rows:
           try:
-            cursor.execute("insert into users values (%s, %s, 'internet_128', 'ad');", (line.split()[0],line.split()[1],))
+            cursor.execute("insert into users values (%s, %s, %s, 'ad');", (line.split()[0],line.split()[1],speed,))
           except psycopg2.DatabaseError as error:
             print(error)
             sys.exit(1)
           # Запись в лог файл
           with open(config_get('LogFile'),'a') as logfile:
-            logfile.write('Insert ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
+            logfile.write('Insert ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
           conn_pg.commit()
         # Если ip адрес есть, но отличается имя пользователя, меняем в базе
-        if rows and rows[0][1] != line.split()[1]:
+        if rows and (rows[0][1] != line.split()[1] or rows[0][2] != speed):
           try:
-            cursor.execute("update users set username = %s where ip = %s;", (line.split()[1],line.split()[0],))
+            cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
           except psycopg2.DatabaseError as error:
             print(error)
             sys.exit(1)
           # Запись в лог файл
           with open(config_get('LogFile'),'a') as logfile:
-            logfile.write('Update ip:'+line.split()[0]+"  user:"+line.split()[1]+'\n')
+            logfile.write('Update ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
           conn_pg.commit()
         cursor.close()
     conn_pg.close()
