@@ -126,7 +126,7 @@ def track_events():
         script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet*'"""
         speed, streams, had_error = client.execute_ps(script)
         # Проверка на отсутствие группы скорости
-        if not speed:
+        if not speed and speed.find('internet_') != -1:
           speed = 'no'
         # Запись в лог файл
         with open(config_get('LogFile'),'a') as logfile:
