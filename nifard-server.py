@@ -125,7 +125,7 @@ def track_events():
         # Получение группы для текущего пользователя (фильтрация по internet)
         script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet*'"""
         speed, streams, had_error = client.execute_ps(script)
-        # Проверка на отсутствие группы скорости
+        # Проверка на пустоту и отсутствие группы скорости
         if not speed and speed.find('internet_') != -1:
           speed = 'no'
         # Запись в лог файл
