@@ -126,7 +126,7 @@ def track_events():
         script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet*'"""
         speed, streams, had_error = client.execute_ps(script)
         # Проверка на пустоту и отсутствие группы скорости
-        if not speed or speed.strip().find('internet_') != -1:
+        if not speed or speed.find('internet_') == -1:
           speed = 'no'
         # Запись в лог файл
         with open(config_get('LogFile'),'a') as logfile:
@@ -151,7 +151,7 @@ def track_events():
           with open(config_get('LogFile'),'a') as logfile:
             logfile.write('Insert ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
           conn_pg.commit()
-        # Если ip адрес есть, но отличается имя пользователя, меняем в базе
+        # Если ip адрес есть, но отличается имя пользователя или скорость, меняем в базе
         if rows and (rows[0][1] != line.split()[1] or rows[0][2] != speed):
           try:
             cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
