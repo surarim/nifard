@@ -3,9 +3,11 @@
 
 import os, psycopg2, threading, time, sys, signal, subprocess
 from pypsrp.client import Client
+from scapy.all import *
 
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
+ip_traf = [] # Список кэшированных ip адресов и их трафик
 
 # Получение значения параметра конфигурации
 def config_get(key):
@@ -32,14 +34,6 @@ if not os.path.isfile(config_get('LogFile')):
   if not os.path.exists(logdir):
     os.makedirs(logdir)
   open(config_get('LogFile'),'a').close()
-
-# Обработчик сигналов завершения процесса
-def kill_signals(signum, frame):
-  # Установка завершения работы
-  global exit
-  exit = True
-signal.signal(signal.SIGINT, kill_signals)
-signal.signal(signal.SIGTERM, kill_signals)
 
 # Поток изменений в nftables
 def setup_nftables():
@@ -112,9 +106,9 @@ def track_events():
     client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
     script = """Get-EventLog -LogName security -ComputerName """+config_get('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}} -Unique"""
     result, streams, had_error = client.execute_ps(script)
-    # Connection to the database
-    # Подключение к базе
     try:
+      # Connection to the database
+      # Подключение к базе
       conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
     except psycopg2.DatabaseError as error:
       print(error)
@@ -122,6 +116,9 @@ def track_events():
     for line in result.splitlines():
       # Выбор ip адреса только соответствующего маске ADUserIPMask
       if line.find(config_get('ADUserIPMask')) != -1:
+        # Повторная проверка на завершение потока
+        if exit:
+          break
         # Получение группы для текущего пользователя (фильтрация по internet)
         script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
         speed, streams, had_error = client.execute_ps(script)
@@ -173,12 +170,46 @@ def track_events():
   with open(config_get('LogFile'),'a') as logfile:
     logfile.write('Thread track_events stopped\n')
 
-# Running threads
-# Запуск потоков
+# Класс для работы с сетевыми пакетами
+class sniff_packets(Thread):
+  # Стартовые параметры
+  def  __init__(self):
+    super().__init__()
+    self.socket = None
+    self.daemon = True
+  # Обработчик каждого пакета
+  def work_with_packet(self, packet):
+    # Проверка пакета на валидность и локальные ip адреса
+    if IP in packet[0] and packet[1].dst.find('255')==-1 and packet[1].dst.find(config_get('ADUserIPMask'))!=-1:
+      # Добавление нового счётчика трафика
+      if packet[1].dst not in ip_traf:
+        ip_traf.append(packet[1].dst)
+        ip_traf.append(packet[1].len)
+      # Добавление показаний трафика к уже существующему счётчику
+      if packet[1].dst in ip_traf:
+        pos = ip_traf.index(packet[1].dst)
+        ip_traf[pos+1]=ip_traf[pos+1]+packet[1].len
+
+  # Главный модуль выполнения класса
+  def run(self):
+    self.socket = conf.L2listen(type=ETH_P_ALL, filter="ip")
+    sniff(opened_socket=self.socket, iface=config_get('LANInterface'), prn=self.work_with_packet)
+
+# Запуск всех компонентов сервера
 if __name__ =='__main__':
+  # Запуск потока обработки сетевых пакетов
+  sniffer = sniff_packets()
+  sniffer.start()
+  # Запуск потока изменений в nftables
   thread_setup_nftables = threading.Thread(target=setup_nftables, name="setup_nftables")
-  thread_track_events = threading.Thread(target=track_events, name="track_events")
   thread_setup_nftables.start()
+  # Запуск потока чтения данных из AD
+  thread_track_events = threading.Thread(target=track_events, name="track_events")
   thread_track_events.start()
-  thread_setup_nftables.join()
-  thread_track_events.join()
+  try:
+    # Цикл работы потока сетевых пакетов
+    while True:
+      time.sleep(0.1)
+      print(ip_traf)
+  except KeyboardInterrupt:
+    exit = True

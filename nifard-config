@@ -3,6 +3,9 @@
 # Имя внешнего Интернет интерфейса
 InternetInterface = enp5s0
 
+# Имя внутреннего LAN интерфейса
+LANInterface = enp3s0
+
 # Имя пользователя базы данных
 DatabaseUserName = postgres
 
