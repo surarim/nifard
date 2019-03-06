@@ -81,8 +81,8 @@ def setup_nftables():
       access = row[3] # Тип доступа
       # Проверка ip адреса на валидность
       if ip.count('.') == 3 and ip.find(config_get('ADUserIPMask')) != -1:
-        # Проверка типа доступа
-        if access.find('always') != -1 or access.find('ad') !=-1:
+        # Проверка типа доступа и скорости
+        if access.find('always') != -1 or (access.find('ad') !=-1 and speed != 'no'):
           # Создание строки доступа для выбранного ip
           command = command + 'nft add rule nat postrouting ip saddr '+ip+' oif '+config_get('InternetInterface')+' masquerade\n'
     # Очистка таблицы nat и добавление всех правил
@@ -123,7 +123,7 @@ def track_events():
       # Выбор ip адреса только соответствующего маске ADUserIPMask
       if line.find(config_get('ADUserIPMask')) != -1:
         # Получение группы для текущего пользователя (фильтрация по internet)
-        script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet*'"""
+        script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
         speed, streams, had_error = client.execute_ps(script)
         # Проверка на пустоту и отсутствие группы скорости
         if not speed or speed.find('internet_') == -1:
