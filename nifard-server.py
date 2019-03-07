@@ -8,10 +8,18 @@ from scapy.all import *
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
 ip_traf = [] # Список кэшированных ip адресов и их трафик
+ip_local = [] # Список ip адресов самого сервера
 
 # Получение значения параметра конфигурации
 def config_get(key):
   return config[config.index(key)+1]
+
+# Получение ip адресов самого сервера
+try:
+  ip_local=(subprocess.check_output('hostname -I', shell=True).strip()).decode().split()
+except OSError as error:
+  print(error)
+  sys.exit(1)
 
 # Чтение файла конфигурации
 try:
@@ -179,16 +187,18 @@ class sniff_packets(Thread):
     self.daemon = True
   # Обработчик каждого пакета
   def work_with_packet(self, packet):
-    # Проверка пакета на валидность и локальные ip адреса
-    if IP in packet[0] and packet[1].dst.find('255')==-1 and packet[1].dst.find(config_get('ADUserIPMask'))!=-1:
-      # Добавление нового счётчика трафика
-      if packet[1].dst not in ip_traf:
-        ip_traf.append(packet[1].dst)
-        ip_traf.append(packet[1].len)
-      # Добавление показаний трафика к уже существующему счётчику
-      if packet[1].dst in ip_traf:
-        pos = ip_traf.index(packet[1].dst)
-        ip_traf[pos+1]=ip_traf[pos+1]+packet[1].len
+    # Проверка пакета на валидность и не широковещательность
+    if IP in packet[0] and packet[1].dst.find('255')==-1:
+      # Проверка адреса назначения на локальные адреса, что это не сервер и исходящий адрес из Интернета
+      if packet[1].dst.find(config_get('ADUserIPMask'))!=-1 and packet[1].dst not in ip_local and packet[1].src.find(config_get('ADUserIPMask'))==-1:
+        # Добавление нового счётчика трафика
+        if packet[1].dst not in ip_traf:
+          ip_traf.append(packet[1].dst)
+          ip_traf.append(packet[1].len)
+        # Добавление показаний трафика к уже существующему счётчику
+        else:
+          pos = ip_traf.index(packet[1].dst)
+          ip_traf[pos+1]=ip_traf[pos+1]+packet[1].len
 
   # Главный модуль выполнения класса
   def run(self):
