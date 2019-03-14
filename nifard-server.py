@@ -1,9 +1,14 @@
 #!/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import os, psycopg2, threading, time, sys, signal, subprocess
-from pypsrp.client import Client
-from scapy.all import *
+import os, time, threading, sys, subprocess
+try:
+  import psycopg2
+  from pypsrp.client import Client
+  from scapy.all import *
+except ModuleNotFoundError as err:
+  print(err)
+  sys.exit(1)
 
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
@@ -60,6 +65,9 @@ def ip_local_get():
 
 # Функция инициализации настроек и среды сервера
 def init_server():
+  if subprocess.call('which nft',stdout=subprocess.PIPE, shell=True) == 1:
+    print('nftables not found')
+    sys.exit(1)
   log_write('Server Started')
 
 #------------------------------------------------------------------------------------------------
