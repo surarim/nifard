@@ -127,49 +127,49 @@ def traffic_nftables():
   # Запись в лог файл
   with open(config_get('LogFile'),'a') as logfile:
     logfile.write('Thread traffic_nftables running\n')
+  try:
+  # Подключение к базе
+    conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
+  except psycopg2.DatabaseError as error:
+    print(error)
+    sys.exit(1)
+  # Цикл чтения nftables по показетелю ip трафик
   while not exit:
-    try:
-      # Подключение к базе
-      conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
-    except psycopg2.DatabaseError as error:
-      print(error)
-      sys.exit(1)
     if subprocess.call('nft list tables | grep traffic',stdout=subprocess.PIPE, shell=True) == 0:
-      result = subprocess.check_output('nft list table traffic | grep "ip daddr"', shell=True).decode()
+      result = subprocess.check_output('nft list table traffic | grep "ip daddr" | cut -d" " -f3,8', shell=True).decode()
       for line in result.splitlines():
-        print(line.strip())
-      # Выбор ip адреса только соответствующего маске ADUserIPMask
-#      if line.find(config_get('ADUserIPMask')) != -1:
-#        # Повторная проверка на завершение потока
-#        if exit:
-#          break
-#        # Поиск в базе выбранного ip адреса
-#        cursor = conn_pg.cursor()
-#        try:
-#          cursor.execute("select ip,username,speed from users where ip = %s;", (line.split()[0],))
-#        except psycopg2.DatabaseError as error:
-#          print(error)
-#          sys.exit(1)
-#        conn_pg.commit()
-#        rows = cursor.fetchall()
-#        # Если ip адрес есть, меняем в базе
-#        if rows:
-#          try:
-#            cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
-#          except psycopg2.DatabaseError as error:
-#            print(error)
-#            sys.exit(1)
-#          # Запись в лог файл
-#          with open(config_get('LogFile'),'a') as logfile:
-#            logfile.write('Update ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
-#          conn_pg.commit()
-#        cursor.close()
-    conn_pg.close()
+        # Выбор ip адреса только соответствующего маске ADUserIPMask
+        if line.find(config_get('ADUserIPMask')) != -1:
+          # Повторная проверка на завершение потока
+          if exit:
+            break
+          # Поиск в базе выбранного ip адреса
+          cursor = conn_pg.cursor()
+          try:
+            cursor.execute("select ip,traffic from users where ip = %s;", (line.split()[0],))
+          except psycopg2.DatabaseError as error:
+            print(error)
+            sys.exit(1)
+          conn_pg.commit()
+          rows = cursor.fetchall()
+          # Если ip адрес есть, меняем его трафик в базе
+          if rows:
+            try:
+              cursor.execute("update users set traffic = %s where ip = %s;", (line.split()[1],line.split()[0],))
+            except psycopg2.DatabaseError as error:
+              print(error)
+              sys.exit(1)
+            conn_pg.commit()
+            # Запись в лог файл
+            with open(config_get('LogFile'),'a') as logfile:
+              logfile.write('Update ip:'+line.split()[0]+'  traffic:'+line.split()[1]+'\n')
+          cursor.close()
     # Ожидание потока
     for tick in range(5):
       time.sleep(1)
       if exit:
         break
+  conn_pg.close()
   # Запись в лог файл
   with open(config_get('LogFile'),'a') as logfile:
     logfile.write('Thread traffic_nftables stopped\n')
