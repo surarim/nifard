@@ -12,38 +12,55 @@ rules_list = '' # Строка со списком правил для nftables
 
 #------------------------------------------------------------------------------------------------
 
-# Получение значения параметра конфигурации
+# Функция записи в лог файл
+def log_write(message):
+  # Подготовка лог файла
+  if not os.path.isfile(config_get('LogFile')):
+    logdir = os.path.dirname(config_get('LogFile'))
+    if not os.path.exists(logdir):
+      os.makedirs(logdir)
+    open(config_get('LogFile'),'a').close()
+  # Запись в лог файл
+  with open(config_get('LogFile'),'a') as logfile:
+    logfile.write(message+'\n')
+
+#------------------------------------------------------------------------------------------------
+
+# Функция получения значений параметров конфигурации
 def config_get(key):
+  global config
+  if not config:
+    # Чтение файла конфигурации
+    try:
+      if os.path.isfile('/etc/nifard/nifard-config'):
+        configfile = open('/etc/nifard/nifard-config')
+      else:
+        configfile = open('nifard-config')
+    except IOError as error:
+      log_write(error)
+    else:
+      for line in configfile:
+        param = line.partition('=')[::2]
+        if param[0].strip().isalpha() and param[1].strip().find('#') == -1:
+          config.append(param[0].strip())
+          config.append(param[1].strip())
   return config[config.index(key)+1]
 
-# Получение ip адресов самого сервера
-try:
-  ip_local=(subprocess.check_output('hostname -I', shell=True).strip()).decode().split()
-except OSError as error:
-  print(error)
-  sys.exit(1)
+#------------------------------------------------------------------------------------------------
 
-# Чтение файла конфигурации
-try:
-  if os.path.isfile('/etc/nifard/nifard-config'):
-    configfile = open('/etc/nifard/nifard-config')
-  else:
-    configfile = open('nifard-config')
-except IOError as error:
-  print(error)
-else:
-  for line in configfile:
-    param = line.partition('=')[::2]
-    if param[0].strip().isalpha() and param[1].strip().find('#') == -1:
-      config.append(param[0].strip())
-      config.append(param[1].strip())
+def ip_local_get():
+  global ip_local
+  # Получение ip адресов самого сервера
+  try:
+    ip_local=(subprocess.check_output('hostname -I', shell=True).strip()).decode().split()
+  except OSError as error:
+    log_write(error)
+    sys.exit(1)
+  return ip_local
 
-# Подготовка лог файла
-if not os.path.isfile(config_get('LogFile')):
-  logdir = os.path.dirname(config_get('LogFile'))
-  if not os.path.exists(logdir):
-    os.makedirs(logdir)
-  open(config_get('LogFile'),'a').close()
+# Функция инициализации настроек и среды сервера
+def init_server():
+  log_write('Server Started')
 
 #------------------------------------------------------------------------------------------------
 
@@ -51,19 +68,18 @@ if not os.path.isfile(config_get('LogFile')):
 def setup_nftables():
   global rules_list
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread setup_nftables running\n')
+  log_write('Thread setup_nftables running')
   try:
     # Подключение к базе
     conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
   except psycopg2.DatabaseError as error:
-    print(error)
+    log_write(error)
     sys.exit(1)
   try:
     # Очистка правил nftables
     subprocess.call('nft flush ruleset', shell=True)
   except OSError as error:
-    print(error)
+    log_write(error)
     sys.exit(1)
   # Создание таблицы nat и цепочки postrouting в nftables
   subprocess.call('nft add table nat', shell=True)
@@ -78,7 +94,7 @@ def setup_nftables():
     try:
       cursor.execute("select * from users;")
     except psycopg2.DatabaseError as error:
-      print(error)
+      log_write(error)
       subprocess.call('nft flush ruleset', shell=True)
       sys.exit(1)
     conn_pg.commit()
@@ -105,9 +121,8 @@ def setup_nftables():
             # Добавление текущих правил в nftables
             subprocess.call(rule_nat + rule_traffic, shell=True)
             # Запись в лог файл
-            with open(config_get('LogFile'),'a') as logfile:
-              logfile.write(rule_nat)
-              logfile.write(rule_traffic)
+            log_write(rule_nat)
+            log_write(rule_traffic)
     # Закрытие курсора и задержка выполнения
     cursor.close()
     # Ожидание потока
@@ -118,20 +133,18 @@ def setup_nftables():
   conn_pg.close()
   subprocess.call('nft flush ruleset', shell=True)
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread setup_nftables stopped\n')
+  log_write('Thread setup_nftables stopped')
 
 #------------------------------------------------------------------------------------------------
 # Поток чтения трафика и обновления базы
 def traffic_nftables():
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread traffic_nftables running\n')
+  log_write('Thread traffic_nftables running')
   try:
   # Подключение к базе
     conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
   except psycopg2.DatabaseError as error:
-    print(error)
+    log_write(error)
     sys.exit(1)
   # Цикл чтения nftables по показетелю ip трафик
   while not exit:
@@ -148,7 +161,7 @@ def traffic_nftables():
           try:
             cursor.execute("select ip,traffic from users where ip = %s;", (line.split()[0],))
           except psycopg2.DatabaseError as error:
-            print(error)
+            log_write(error)
             sys.exit(1)
           conn_pg.commit()
           rows = cursor.fetchall()
@@ -157,12 +170,11 @@ def traffic_nftables():
             try:
               cursor.execute("update users set traffic = %s where ip = %s;", (line.split()[1],line.split()[0],))
             except psycopg2.DatabaseError as error:
-              print(error)
+              log_write(error)
               sys.exit(1)
             conn_pg.commit()
             # Запись в лог файл
-            with open(config_get('LogFile'),'a') as logfile:
-              logfile.write('Update ip:'+line.split()[0]+'  traffic:'+line.split()[1]+'\n')
+            log_write('Update ip:'+line.split()[0]+'  traffic:'+line.split()[1])
           cursor.close()
     # Ожидание потока
     for tick in range(5):
@@ -171,8 +183,7 @@ def traffic_nftables():
         break
   conn_pg.close()
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread traffic_nftables stopped\n')
+  log_write('Thread traffic_nftables stopped')
 
 #------------------------------------------------------------------------------------------------
 
@@ -180,8 +191,7 @@ def traffic_nftables():
 # Затем добавление новых записей в базу данных
 def track_events():
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread track_events running\n')
+  log_write('Thread track_events running')
   while not exit:
     # Подключение в серверу и получение журнала security со всеми фильтрами
     client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
@@ -191,7 +201,7 @@ def track_events():
       # Подключение к базе
       conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
     except psycopg2.DatabaseError as error:
-      print(error)
+      log_write(error)
       sys.exit(1)
     for line in result.splitlines():
       # Выбор ip адреса только соответствующего маске ADUserIPMask
@@ -206,14 +216,13 @@ def track_events():
         if not speed or speed.find('internet_') == -1:
           speed = 'no'
         # Запись в лог файл
-        with open(config_get('LogFile'),'a') as logfile:
-          logfile.write('New ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
+        log_write('New ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
         # Поиск в базе выбранного ip адреса
         cursor = conn_pg.cursor()
         try:
           cursor.execute("select ip,username,speed from users where ip = %s;", (line.split()[0],))
         except psycopg2.DatabaseError as error:
-          print(error)
+          log_write(error)
           sys.exit(1)
         conn_pg.commit()
         rows = cursor.fetchall()
@@ -222,22 +231,20 @@ def track_events():
           try:
             cursor.execute("insert into users values (%s, %s, %s, 'ad', 0);", (line.split()[0],line.split()[1],speed,))
           except psycopg2.DatabaseError as error:
-            print(error)
+            log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          with open(config_get('LogFile'),'a') as logfile:
-            logfile.write('Insert ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
+          log_write('Insert ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
           conn_pg.commit()
         # Если ip адрес есть, но отличается имя пользователя или скорость, меняем в базе
         if rows and (rows[0][1] != line.split()[1] or rows[0][2] != speed):
           try:
             cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
           except psycopg2.DatabaseError as error:
-            print(error)
+            log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          with open(config_get('LogFile'),'a') as logfile:
-            logfile.write('Update ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed+'\n')
+          log_write('Update ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
           conn_pg.commit()
         cursor.close()
     conn_pg.close()
@@ -247,8 +254,7 @@ def track_events():
       if exit:
         break
   # Запись в лог файл
-  with open(config_get('LogFile'),'a') as logfile:
-    logfile.write('Thread track_events stopped\n')
+  log_write('Thread track_events stopped')
 
 #------------------------------------------------------------------------------------------------
 
@@ -275,6 +281,8 @@ class sniff_packets(Thread):
 
 # Запуск всех компонентов сервера
 if __name__ =='__main__':
+  # Начальная инициализация
+  init_server()
   # Запуск потока обработки сетевых пакетов
   sniffer = sniff_packets()
   sniffer.start()
