@@ -22,7 +22,7 @@ def log_write(message):
     open(config_get('LogFile'),'a').close()
   # Запись в лог файл
   with open(config_get('LogFile'),'a') as logfile:
-    logfile.write(message+'\n')
+    logfile.write(str(datetime.now())+' '+message+'\n')
 
 #------------------------------------------------------------------------------------------------
 
@@ -121,8 +121,7 @@ def setup_nftables():
             # Добавление текущих правил в nftables
             subprocess.call(rule_nat + rule_traffic, shell=True)
             # Запись в лог файл
-            log_write(rule_nat)
-            log_write(rule_traffic)
+            log_write('Added '+ip+' in nftables')
     # Закрытие курсора и задержка выполнения
     cursor.close()
     # Ожидание потока
@@ -165,8 +164,8 @@ def traffic_nftables():
             sys.exit(1)
           conn_pg.commit()
           rows = cursor.fetchall()
-          # Если ip адрес есть, меняем его трафик в базе
-          if rows:
+          # Если ip адрес есть и его трафик изменился, меняем его в базе
+          if rows and (int(rows[0][1]) != int(line.split()[1])):
             try:
               cursor.execute("update users set traffic = %s where ip = %s;", (line.split()[1],line.split()[0],))
             except psycopg2.DatabaseError as error:
@@ -174,7 +173,7 @@ def traffic_nftables():
               sys.exit(1)
             conn_pg.commit()
             # Запись в лог файл
-            log_write('Update ip:'+line.split()[0]+'  traffic:'+line.split()[1])
+            log_write('Update '+line.split()[0]+' traffic:'+line.split()[1])
           cursor.close()
     # Ожидание потока
     for tick in range(5):
@@ -216,7 +215,7 @@ def track_events():
         if not speed or speed.find('internet_') == -1:
           speed = 'no'
         # Запись в лог файл
-        log_write('New ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
+        log_write('New '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
         # Поиск в базе выбранного ip адреса
         cursor = conn_pg.cursor()
         try:
@@ -234,17 +233,17 @@ def track_events():
             log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          log_write('Insert ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
+          log_write('Insert '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
           conn_pg.commit()
         # Если ip адрес есть, но отличается имя пользователя или скорость, меняем в базе
-        if rows and (rows[0][1] != line.split()[1] or rows[0][2] != speed):
+        if rows and (str(rows[0][1]) != str(line.split()[1]) or str(rows[0][2]) != speed):
           try:
             cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          log_write('Update ip:'+line.split()[0]+'  user:'+line.split()[1]+'  speed:'+speed)
+          log_write('Update '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
           conn_pg.commit()
         cursor.close()
     conn_pg.close()
@@ -271,7 +270,8 @@ class sniff_packets(Thread):
     if IP in packet[0] and packet[1].dst.find('255')==-1:
       # Проверка адреса назначения на локальные адреса, что это не сервер и исходящий адрес из Интернета
       if packet[1].dst.find(config_get('ADUserIPMask'))!=-1 and packet[1].dst not in ip_local and packet[1].src.find(config_get('ADUserIPMask'))==-1:
-        print(packet[1].summary())
+        #print(packet[1].summary())
+        pass
   # Главный модуль выполнения класса
   def run(self):
     self.socket = conf.L2listen(type=ETH_P_ALL, filter="ip")
