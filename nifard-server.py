@@ -13,7 +13,6 @@ except ModuleNotFoundError as err:
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
 ip_local = [] # Список ip адресов самого сервера
-rules_list = '' # Строка со списком правил для nftables
 
 #------------------------------------------------------------------------------------------------
 
@@ -68,13 +67,12 @@ def init_server():
   if subprocess.call('which nft',stdout=subprocess.PIPE, shell=True) == 1:
     print('nftables not found')
     sys.exit(1)
-  log_write('Server Started')
+  log_write('Init Server')
 
 #------------------------------------------------------------------------------------------------
 
 # Поток изменений в nftables
 def setup_nftables():
-  global rules_list
   # Запись в лог файл
   log_write('Thread setup_nftables running')
   try:
@@ -107,7 +105,12 @@ def setup_nftables():
       sys.exit(1)
     conn_pg.commit()
     rows = cursor.fetchall()
+    # Получение текущего списка правил nftables
+    rules_list = subprocess.check_output('nft list table nat', shell=True).decode().strip()
     for row in rows:
+      # Повторная проверка на завершение потока
+      if exit:
+        break
       rule_nat = '' # Обнуление текущего правила для nat
       rule_traffic = '' # Обнуление текущего правила для traffic
       ip = row[0] # IP адрес
@@ -119,17 +122,29 @@ def setup_nftables():
         # Проверка типа доступа и скорости
         if access.find('always') != -1 or (access.find('ad') !=-1 and speed != 'no'):
           # Проверка на уже добавленное правило
-          if ip not in rules_list:
+          if ' '+ip+' ' not in rules_list:
             # Формирование правила в nat
             rule_nat = 'nft add rule nat postrouting ip saddr '+ip+' oif '+config_get('InternetInterface')+' masquerade\n'
             # Формирование правила в traffic
             rule_traffic = 'nft add rule traffic prerouting ip daddr '+ip+' counter\n'
             # Добавление строки доступа для выбранного ip в строку с другими правилами
-            rules_list = rules_list + rule_nat + rule_traffic
+            #rules_list = rules_list + rule_nat + rule_traffic
             # Добавление текущих правил в nftables
             subprocess.call(rule_nat + rule_traffic, shell=True)
             # Запись в лог файл
             log_write('Added '+ip+' in nftables')
+        # Проверка на удаление правила
+        else:
+          # Проверка на наличие его в rules_list
+          if ' '+ip+' ' in rules_list and rules_list:
+            rule_nat = subprocess.check_output('nft list table nat -a | grep " '+ip+' " | cut -d" " -f9', shell=True).decode().strip()
+            rule_nat = 'nft delete rule nat postrouting handle '+rule_nat+'\n'
+            rule_traffic = subprocess.check_output('nft list table traffic -a | grep '+ip+' | cut -d" " -f11', shell=True).decode().strip()
+            rule_traffic = 'nft delete rule traffic prerouting handle '+rule_traffic+'\n'
+            # Удаление выбранного правила из nftables
+            subprocess.call(rule_nat + rule_traffic, shell=True)
+            # Запись в лог файл
+            log_write('Delete '+ip+' from nftables')
     # Закрытие курсора и задержка выполнения
     cursor.close()
     # Ожидание потока
