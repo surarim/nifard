@@ -13,6 +13,7 @@ except ModuleNotFoundError as err:
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
 ip_local = [] # Список ip адресов самого сервера
+ip_clients = [] # Список ip адресов клиентских ПК
 
 #------------------------------------------------------------------------------------------------
 
@@ -52,20 +53,17 @@ def config_get(key):
 
 #------------------------------------------------------------------------------------------------
 
-def ip_local_get():
+# Функция инициализации настроек и среды сервера
+def init_server():
+  if subprocess.call('which nft',stdout=subprocess.PIPE, shell=True) == 1:
+    print('nftables not found')
+    sys.exit(1)
   global ip_local
   # Получение ip адресов самого сервера
   try:
     ip_local=(subprocess.check_output('hostname -I', shell=True).strip()).decode().split()
   except OSError as error:
     log_write(error)
-    sys.exit(1)
-  return ip_local
-
-# Функция инициализации настроек и среды сервера
-def init_server():
-  if subprocess.call('which nft',stdout=subprocess.PIPE, shell=True) == 1:
-    print('nftables not found')
     sys.exit(1)
   log_write('Init Server')
 
@@ -158,7 +156,7 @@ def setup_nftables():
   log_write('Thread setup_nftables stopped')
 
 #------------------------------------------------------------------------------------------------
-# Поток чтения трафика и обновления базы
+# Поток чтения трафика из nftables и обновления базы
 def traffic_nftables():
   # Запись в лог файл
   log_write('Thread traffic_nftables running')
@@ -289,12 +287,12 @@ class sniff_packets(Thread):
     self.daemon = True
   # Обработчик каждого пакета
   def work_with_packet(self, packet):
-    # Проверка пакета на валидность и не широковещательность
-    if IP in packet[0] and packet[1].dst.find('255')==-1:
-      # Проверка адреса назначения на локальные адреса, что это не сервер и исходящий адрес из Интернета
-      if packet[1].dst.find(config_get('ADUserIPMask'))!=-1 and packet[1].dst not in ip_local and packet[1].src.find(config_get('ADUserIPMask'))==-1:
-        #print(packet[1].summary())
-        pass
+    # Проверка пакета на валидность и что ip адрес источника не сам сервер
+    if IP in packet[0] and packet[1].src not in ip_local:
+      # Проверка, что адрес источника находится в локальной сети и ip клиента новый
+      if packet[1].src.find(config_get('ADUserIPMask'))!=-1 and packet[1].src not in ip_clients:
+        ip_clients.append(packet[1].src)
+        print(ip_clients)
   # Главный модуль выполнения класса
   def run(self):
     self.socket = conf.L2listen(type=ETH_P_ALL, filter="ip")
