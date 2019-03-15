@@ -1,7 +1,7 @@
 #!/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import os, time, threading, sys, subprocess
+import os, time, threading, sys, subprocess, socket
 try:
   import psycopg2
   from pypsrp.client import Client
@@ -14,6 +14,7 @@ exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
 ip_local = [] # Список ip адресов самого сервера
 ip_clients = [] # Список ip адресов клиентских ПК
+ip_new_block = False # Блокировка добавления ip на время обработки
 
 #------------------------------------------------------------------------------------------------
 
@@ -113,8 +114,9 @@ def setup_nftables():
       rule_traffic = '' # Обнуление текущего правила для traffic
       ip = row[0] # IP адрес
       username = row[1] # Имя пользователя
-      speed = row[2] # Скорость
-      access = row[3] # Тип доступа
+      computer = row[2] # Имя компьютера
+      speed = row[3] # Скорость
+      access = row[4] # Тип доступа
       # Проверка ip адреса на валидность
       if ip.count('.') == 3 and ip.find(config_get('ADUserIPMask')) != -1:
         # Проверка типа доступа и скорости
@@ -156,6 +158,7 @@ def setup_nftables():
   log_write('Thread setup_nftables stopped')
 
 #------------------------------------------------------------------------------------------------
+
 # Поток чтения трафика из nftables и обновления базы
 def traffic_nftables():
   # Запись в лог файл
@@ -207,9 +210,11 @@ def traffic_nftables():
 
 #------------------------------------------------------------------------------------------------
 
-# Поток чтения журнала security и получения связки: ip пользователь
+# Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
 # Затем добавление новых записей в базу данных
 def track_events():
+  global ip_clients
+  global ip_new_block
   # Запись в лог файл
   log_write('Thread track_events running')
   while not exit:
@@ -223,24 +228,44 @@ def track_events():
     except psycopg2.DatabaseError as error:
       log_write(error)
       sys.exit(1)
+    # Временная блокировака добавления новых ip
+    ip_new_block = True
+    # Цикл добавления клиентов, полученных из журнала, в общий список
     for line in result.splitlines():
-      # Выбор ip адреса только соответствующего маске ADUserIPMask
-      if line.find(config_get('ADUserIPMask')) != -1:
+      if line.find(config_get('ADUserIPMask')) != -1 and line not in ip_clients:
+        # Получение параметров клиента
+        ip = line.split()[0] # IP адрес клиента
+        username = line.split()[1] # Имя пользователя
+        computer = socket.gethostbyaddr(ip)[0] # Имя компьютера
+        computer = computer[0:computer.index('.')] # Имя компьютера без доменной части
+        # Добавление нового клиента в список
+        ip_clients.append(ip)
+        ip_clients.append(username)
+        ip_clients.append(computer)
+    # Цикл добавления новых клиентов в базу
+    for pos in range(0,len(ip_clients),3):
         # Повторная проверка на завершение потока
         if exit:
           break
-        # Получение группы для текущего пользователя (фильтрация по internet)
-        script = """([ADSISEARCHER]'samaccountname="""+line.split()[1]+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
+        ip = ip_clients[pos] # IP адрес клиента
+        username = ip_clients[pos+1] # Имя пользователя
+        computer = ip_clients[pos+2]  # Имя компьютера
+        if username != '':
+          # Получение группы для текущего пользователя (фильтрация по internet)
+          script = """([ADSISEARCHER]'samaccountname="""+username+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
+        else:
+          # Получение группы для текущего компьютера (фильтрация по internet)
+          script = """([ADSISEARCHER]'cn="""+computer+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
         speed, streams, had_error = client.execute_ps(script)
         # Проверка на пустоту и отсутствие группы скорости
         if not speed or speed.find('internet_') == -1:
           speed = 'no'
         # Запись в лог файл
-        log_write('New '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
+        log_write('New '+ip+' '+username+' speed:'+speed)
         # Поиск в базе выбранного ip адреса
         cursor = conn_pg.cursor()
         try:
-          cursor.execute("select ip,username,speed from users where ip = %s;", (line.split()[0],))
+          cursor.execute("select ip,username,speed from users where ip = %s;", (ip,))
         except psycopg2.DatabaseError as error:
           log_write(error)
           sys.exit(1)
@@ -249,25 +274,29 @@ def track_events():
         # Если ip адреса нет в базе, добавляем
         if not rows:
           try:
-            cursor.execute("insert into users values (%s, %s, %s, 'ad', 0);", (line.split()[0],line.split()[1],speed,))
+            cursor.execute("insert into users values (%s, %s, %s, %s, 'ad', 0);", (ip, username, computer, speed,))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          log_write('Insert '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
+          log_write('Insert '+ip+' '+username+' speed:'+speed)
           conn_pg.commit()
         # Если ip адрес есть, но отличается имя пользователя или скорость, меняем в базе
-        if rows and (str(rows[0][1]) != str(line.split()[1]) or str(rows[0][2]) != speed):
+        if rows and (str(rows[0][1]) != str(username) or str(rows[0][2]) != speed):
           try:
-            cursor.execute("update users set username = %s, speed = %s where ip = %s;", (line.split()[1],speed,line.split()[0],))
+            cursor.execute("update users set username = %s, speed = %s where ip = %s;", (username, speed, ip,))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          log_write('Update '+line.split()[0]+' '+line.split()[1]+' speed:'+speed)
+          log_write('Update '+ip+' '+username+' speed:'+speed)
           conn_pg.commit()
         cursor.close()
     conn_pg.close()
+    # Очистка списка новых клиентов
+    ip_clients = []
+    # Разблокировка добавления новых ip
+    ip_new_block = False
     # Ожидание потока
     for tick in range(5):
       time.sleep(1)
@@ -285,14 +314,25 @@ class sniff_packets(Thread):
     super().__init__()
     self.socket = None
     self.daemon = True
+    global ip_clinets
+    global ip_new_block
   # Обработчик каждого пакета
   def work_with_packet(self, packet):
     # Проверка пакета на валидность и что ip адрес источника не сам сервер
     if IP in packet[0] and packet[1].src not in ip_local:
       # Проверка, что адрес источника находится в локальной сети и ip клиента новый
-      if packet[1].src.find(config_get('ADUserIPMask'))!=-1 and packet[1].src not in ip_clients:
-        ip_clients.append(packet[1].src)
-        print(ip_clients)
+      if packet[1].src.find(config_get('ADUserIPMask'))!=-1 and packet[1].src not in ip_clients and not ip_new_block:
+        # Получаем ip адрес
+        ip_addr = packet[1].src
+        # Имя пользователя неизвестно, поэтому поле пустое
+        username = ''
+        # Получаем dns имя по ip адресу
+        computer = socket.gethostbyaddr(ip_addr)[0]
+        computer = computer[0:computer.index('.')]
+        # Добавляем в список новых клиентов
+        ip_clients.append(ip_addr)
+        ip_clients.append(username)
+        ip_clients.append(computer)
   # Главный модуль выполнения класса
   def run(self):
     self.socket = conf.L2listen(type=ETH_P_ALL, filter="ip")
