@@ -236,8 +236,14 @@ def track_events():
         # Получение параметров клиента
         ip = line.split()[0] # IP адрес клиента
         username = line.split()[1] # Имя пользователя
-        computer = socket.gethostbyaddr(ip)[0] # Имя компьютера
-        computer = computer[0:computer.index('.')] # Имя компьютера без доменной части
+        try:
+          computer = socket.gethostbyaddr(ip)[0] # Имя компьютера
+          print(computer)
+          computer = computer[0:computer.find('.')] # Имя компьютера без доменной части
+          print(computer)
+        except OSError:
+          computer = ''
+          pass
         # Добавление нового клиента в список
         ip_clients.append(ip)
         ip_clients.append(username)
@@ -327,8 +333,12 @@ class sniff_packets(Thread):
         # Имя пользователя неизвестно, поэтому поле пустое
         username = ''
         # Получаем dns имя по ip адресу
-        computer = socket.gethostbyaddr(ip_addr)[0]
-        computer = computer[0:computer.index('.')]
+        try:
+          computer = socket.gethostbyaddr(ip_addr)[0]
+          computer = computer[0:computer.find('.')]
+        except OSError:
+          computer = ''
+          pass
         # Добавляем в список новых клиентов
         ip_clients.append(ip_addr)
         ip_clients.append(username)
