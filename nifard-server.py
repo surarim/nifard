@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import os, time, threading, sys, subprocess, socket
+from queue import Queue
 try:
   import psycopg2
   from pypsrp.client import Client
@@ -71,12 +72,12 @@ def init_server():
 #------------------------------------------------------------------------------------------------
 
 # Поток изменений в nftables
-def setup_nftables():
+def setup_nftables(queue):
   # Запись в лог файл
   log_write('Thread setup_nftables running')
   try:
     # Подключение к базе
-    conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
+    conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword'))
   except psycopg2.DatabaseError as error:
     log_write(error)
     sys.exit(1)
@@ -160,7 +161,7 @@ def setup_nftables():
 #------------------------------------------------------------------------------------------------
 
 # Поток чтения трафика из nftables и обновления базы
-def traffic_nftables():
+def traffic_nftables(queue):
   # Запись в лог файл
   log_write('Thread traffic_nftables running')
   try:
@@ -212,22 +213,23 @@ def traffic_nftables():
 
 # Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
 # Затем добавление новых записей в базу данных
-def track_events():
+def track_events(queue):
   global ip_clients
   global ip_new_block
   # Запись в лог файл
   log_write('Thread track_events running')
+  # Подключение в серверу
+  client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
+  try:
+    # Подключение к базе
+    conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
+  except psycopg2.DatabaseError as error:
+    log_write(error)
+    sys.exit(1)
   while not exit:
-    # Подключение в серверу и получение журнала security со всеми фильтрами
-    client = Client(config_get('ADServer'), auth="kerberos", ssl=False, username=config_get('ADUserName'), password=config_get('ADUserPassword'))
+    # Получение журнала security со всеми фильтрами
     script = """Get-EventLog -LogName security -ComputerName """+config_get('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}} -Unique"""
     result, streams, had_error = client.execute_ps(script)
-    try:
-      # Подключение к базе
-      conn_pg = psycopg2.connect(database='nifard', user=config_get('DatabaseUserName'), password=config_get('DatabasePassword') )
-    except psycopg2.DatabaseError as error:
-      log_write(error)
-      sys.exit(1)
     # Временная блокировака добавления новых ip
     ip_new_block = True
     # Цикл добавления клиентов, полученных из журнала, в общий список
@@ -238,9 +240,7 @@ def track_events():
         username = line.split()[1] # Имя пользователя
         try:
           computer = socket.gethostbyaddr(ip)[0] # Имя компьютера
-          print(computer)
           computer = computer[0:computer.find('.')] # Имя компьютера без доменной части
-          print(computer)
         except OSError:
           computer = ''
           pass
@@ -298,7 +298,6 @@ def track_events():
           log_write('Update '+ip+' '+username+' speed:'+speed)
           conn_pg.commit()
         cursor.close()
-    conn_pg.close()
     # Очистка списка новых клиентов
     ip_clients = []
     # Разблокировка добавления новых ip
@@ -308,6 +307,7 @@ def track_events():
       time.sleep(1)
       if exit:
         break
+  conn_pg.close()
   # Запись в лог файл
   log_write('Thread track_events stopped')
 
@@ -320,7 +320,7 @@ class sniff_packets(Thread):
     super().__init__()
     self.socket = None
     self.daemon = True
-    global ip_clinets
+    global ip_clients
     global ip_new_block
   # Обработчик каждого пакета
   def work_with_packet(self, packet):
@@ -357,15 +357,16 @@ if __name__ =='__main__':
   # Запуск потока обработки сетевых пакетов
   sniffer = sniff_packets()
   sniffer.start()
+  queue = Queue()
   # Запуск потока изменений в nftables
-  thread_setup_nftables = threading.Thread(target=setup_nftables)
-  thread_setup_nftables.start()
+  setup_nftables = threading.Thread(target=setup_nftables, args=(queue,))
+  setup_nftables.start()
   # Запуск потока чтения трафика из nftables
-  thread_traffic_nftables = threading.Thread(target=traffic_nftables)
-  thread_traffic_nftables.start()
+  traffic_nftables = threading.Thread(target=traffic_nftables, args=(queue,))
+  traffic_nftables.start()
   # Запуск потока чтения данных из AD
-  thread_track_events = threading.Thread(target=track_events)
-  thread_track_events.start()
+  track_events = threading.Thread(target=track_events, args=(queue,))
+  track_events.start()
   try:
     # Цикл работы потока сетевых пакетов
     while True:
