@@ -1,6 +1,6 @@
 # nifard
 ### Internet router with transparent access control from Active Directory
-### Version 0.43 (early development)
+### Version 0.50 (early development)
 <hr>
 Internet access router for local ip addresses, with transparent verification of the user in Active Directory.
 <br>
