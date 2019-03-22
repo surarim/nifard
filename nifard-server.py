@@ -80,6 +80,9 @@ def init_server():
   # Создание таблицы traffic и цепочки prerouting в nftables
   subprocess.call('nft add table traffic', shell=True)
   subprocess.call('nft add chain traffic prerouting {type filter hook prerouting priority 0\;}', shell=True)
+  # Создание таблицы speed и цепочки prerouting в nftables
+  subprocess.call('nft add table speed', shell=True)
+  subprocess.call('nft add chain speed prerouting {type filter hook prerouting priority 0\;}', shell=True)
   log_write('Init Server')
 
 #------------------------------------------------------------------------------------------------
@@ -135,22 +138,34 @@ class setup_nftables(Thread):
             if ' '+ip_addr+' ' not in rules_list:
               # Формирование правила в nat
               rule_nat = 'nft add rule nat postrouting ip saddr '+ip_addr+' oif '+get_config('InternetInterface')+' masquerade\n'
-              # Формирование правила в traffic
+              # Формирование правила в traffic (подсчёт трафика)
               rule_traffic = 'nft add rule traffic prerouting ip daddr '+ip_addr+' counter\n'
+              # Формирование правила в speed (оганичение трафика)
+              rule_limit = ''
+              if speed.find('nolimit') == -1:
+                rule_limit = 'nft add rule speed prerouting ip daddr '+ip_addr+' limit rate over '+speed[speed.find('_')+1:]+' kbytes/second drop\n'
               # Добавление текущих правил в nftables
-              subprocess.call(rule_nat + rule_traffic, shell=True)
+              subprocess.call(rule_nat + rule_traffic + rule_limit, shell=True)
               # Запись в лог файл
               log_write('Add '+ip_addr+' in nftables')
           # Проверка на удаление правила
           else:
             # Проверка на наличие его в rules_list
-            if ' '+ip_addr+' ' in rules_list and rules_list:
+            if ' '+ip_addr+' ' in rules_list:
+              # Получение номера правила и удаление для таблицы nat
               rule_nat = subprocess.check_output('nft list table nat -a | grep " '+ip_addr+' " | cut -d" " -f9', shell=True).decode().strip()
               rule_nat = 'nft delete rule nat postrouting handle '+rule_nat+'\n'
+              # Получение номера правила и удаление для таблицы traffic
               rule_traffic = subprocess.check_output('nft list table traffic -a | grep '+ip_addr+' | cut -d" " -f11', shell=True).decode().strip()
               rule_traffic = 'nft delete rule traffic prerouting handle '+rule_traffic+'\n'
+              # Получение номера правила и удаление для таблицы speed
+              rule_speed = subprocess.check_output('nft list table speed -a | grep '+ip_addr+' | cut -d" " -f12', shell=True).decode().strip()
+              if rule_speed.isdigit():
+                rule_speed = 'nft delete rule speed prerouting handle '+rule_speed+'\n'
+              else:
+                rule_speed = ''
               # Удаление выбранного правила из nftables
-              subprocess.call(rule_nat + rule_traffic, shell=True)
+              subprocess.call(rule_nat + rule_traffic + rule_speed, shell=True)
               # Запись в лог файл
               log_write('Del '+ip_addr+' from nftables')
       # Закрытие курсора и задержка выполнения
@@ -301,7 +316,7 @@ class track_events(Thread):
           ip_addr = self.ip_clients[pos] # IP адрес клиента
           username = self.ip_clients[pos+1] # Имя пользователя
           computer = self.ip_clients[pos+2]  # Имя компьютера
-          if username != '':
+          if username != '*':
             # Получение группы для текущего пользователя (фильтрация по internet)
             script = """([ADSISEARCHER]'samaccountname="""+username+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
           else:
@@ -333,7 +348,7 @@ class track_events(Thread):
             # Запись в лог файл
             log_write('Ins '+ip_addr+' '+username+' '+computer+' '+speed)
             conn_pg.commit()
-          # Если ip адрес есть, но отличается имя пользователя, компьютера или скорость, меняем в базе
+          # Если ip адрес есть и изменилось имя пользователя, компьютера или скорость, меняем в базе
           if rows and (str(rows[0][1]) != str(username) or str(rows[0][2]) != str(computer) or str(rows[0][3]) != str(speed)):
             try:
               cursor.execute("update users set username = %s, computer = %s, speed = %s where ip = %s;", (username, computer, speed, ip_addr,))
