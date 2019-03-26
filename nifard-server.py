@@ -128,7 +128,7 @@ class setup_nftables(Thread):
         ip_addr = row[0] # IP адрес
         username = row[1] # Имя пользователя
         computer = row[2] # Имя компьютера
-        speed = row[3] # Скорость
+        speed = row[3] # Группа скорости
         access = row[4] # Тип доступа
         # Проверка ip адреса на валидность
         if ip_addr.count('.') == 3 and ip_addr.find(get_config('ADUserIPMask')) != -1:
@@ -147,7 +147,7 @@ class setup_nftables(Thread):
               # Добавление текущих правил в nftables
               subprocess.call(rule_nat + rule_traffic + rule_limit, shell=True)
               # Запись в лог файл
-              log_write('Add '+ip_addr+' in nftables')
+              log_write('Adding '+ip_addr+' in nftables')
           # Проверка на удаление правила
           else:
             # Проверка на наличие его в rules_list
@@ -167,7 +167,7 @@ class setup_nftables(Thread):
               # Удаление выбранного правила из nftables
               subprocess.call(rule_nat + rule_traffic + rule_speed, shell=True)
               # Запись в лог файл
-              log_write('Del '+ip_addr+' from nftables')
+              log_write('Delete '+ip_addr+' from nftables')
       # Закрытие курсора и задержка выполнения
       cursor.close()
       # Ожидание потока
@@ -228,7 +228,7 @@ class traffic_nftables(Thread):
                 sys.exit(1)
               conn_pg.commit()
               # Запись в лог файл
-              log_write('Upd '+line.split()[0]+' traffic:'+line.split()[1])
+              log_write('Update '+line.split()[0]+' traffic:'+line.split()[1])
             cursor.close()
       # Ожидание потока
       for tick in range(5):
@@ -249,6 +249,7 @@ class track_events(Thread):
     self.daemon = True
     self.queue = queue
     self.ip_clients = [] # Список ip адресов клиентов
+    self.ip_terminals = [] # Список ip адресов серверов терминалов
 
   # Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
   # Затем добавление новых записей в базу данных
@@ -292,7 +293,8 @@ class track_events(Thread):
       # Цикл добавления клиентов, полученных из очереди, в список
       while not self.queue.empty():
         ip_addr = self.queue.get() # IP адрес клиента
-        if ip_addr is None:
+        # Проверка что ip адрес пустой или что он уже есть в списке
+        if ip_addr is None or ip_addr in self.ip_clients:
           break
         username = '*' # Имя пользователя неизвестно
         try:
@@ -328,15 +330,14 @@ class track_events(Thread):
           if not speed or speed.find('internet_') == -1:
             speed = 'no'
           # Запись в лог файл
-          log_write('New '+ip_addr+' '+username+' '+computer+' '+speed)
+          log_write('Newest '+ip_addr+' '+username+' '+computer+' '+speed)
           # Поиск в базе выбранного ip адреса
           cursor = conn_pg.cursor()
           try:
-            cursor.execute("select ip,username,computer,speed from users where ip = %s;", (ip_addr,))
+            cursor.execute("select ip,username,computer,speed,access from users where ip = %s;", (ip_addr,))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
-          conn_pg.commit()
           rows = cursor.fetchall()
           # Если ip адреса нет в базе, добавляем
           if not rows:
@@ -346,24 +347,52 @@ class track_events(Thread):
               log_write(error)
               sys.exit(1)
             # Запись в лог файл
-            log_write('Ins '+ip_addr+' '+username+' '+computer+' '+speed)
+            log_write('Insert '+ip_addr+' '+username+' '+computer+' '+speed)
             conn_pg.commit()
-          # Если ip адрес есть и изменилось имя пользователя, компьютера или скорость, меняем в базе
-          if rows and (str(rows[0][1]) != str(username) or str(rows[0][2]) != str(computer) or str(rows[0][3]) != str(speed)):
-            try:
-              cursor.execute("update users set username = %s, computer = %s, speed = %s where ip = %s;", (username, computer, speed, ip_addr,))
-            except psycopg2.DatabaseError as error:
-              log_write(error)
-              sys.exit(1)
-            # Запись в лог файл
-            if str(rows[0][1]) != str(username):
-              username = str(rows[0][1])+'>'+str(username)
-            if str(rows[0][2]) != str(computer):
-              computer = str(rows[0][2])+'>'+str(computer)
-            if str(rows[0][3]) != str(speed):
-              speed = str(rows[0][3])+'>'+str(speed)
-            log_write('Upd '+ip_addr+' '+username+' '+computer+' '+speed)
+          #
+          # Если ip адрес есть, и тип доступа не 'no'
+          if rows and str(rows[0][4]) != 'no':
+          #
+            # Если изменилось имя пользователя (* не учитывается), тогда запишем ip адрес в подозрение на терминальный сервер
+            if str(rows[0][1]) != str(username) and str(username) != '*' and str(rows[0][1]) != '*':
+              if self.ip_terminals.count(ip_addr) < 2:
+                self.ip_terminals.append(ip_addr)
+              # Это терминальный сервер
+              if self.ip_terminals.count(ip_addr) > 1:
+                # Удаляем все записи о данном сервере
+                while self.ip_terminals.count(ip_addr) > 0:
+                  try:
+                    self.ip_terminals.remove(ip_addr)
+                  except:
+                    pass
+                try:
+                  # Запрещаем доступ с терминального сервера
+                  cursor.execute("update users set access = 'no' where ip = %s;", ( ip_addr,))
+                except psycopg2.DatabaseError as error:
+                  log_write(error)
+                  sys.exit(1)
+                log_write('Detect '+ip_addr+' is terminal server, block access')
+            #
+            # Проверяем изменилось ли имя пользователя, имя компьютера или скорость, тогда меняем в базе
+            # Обновлять если имя пользователя сменилось на другое имя (не *) и тип доступа ad
+            if (str(rows[0][1]) != str(username) or str(rows[0][2]) != str(computer) or str(rows[0][3]) != str(speed)):
+              if (str(rows[0][4]) == 'ad' and str(username) != '*'):
+                try:
+                  cursor.execute("update users set username = %s, computer = %s, speed = %s where ip = %s;", (username, computer, speed, ip_addr,))
+                except psycopg2.DatabaseError as error:
+                  log_write(error)
+                  sys.exit(1)
+                # Запись в лог файл
+                if str(rows[0][1]) != str(username):
+                  username = str(rows[0][1])+'->'+str(username)
+                if str(rows[0][2]) != str(computer):
+                  computer = str(rows[0][2])+'->'+str(computer)
+                if str(rows[0][3]) != str(speed):
+                  speed = str(rows[0][3])+'->'+str(speed)
+                log_write('Update '+ip_addr+' '+username+' '+computer+' '+speed)
+            # Комит всех транзакций
             conn_pg.commit()
+          # Закрытие курсора
           cursor.close()
       # Ожидание потока
       for tick in range(5):
