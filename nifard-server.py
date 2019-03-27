@@ -1,7 +1,7 @@
 #!/usr/local/bin/python3
 # -*- coding: utf-8 -*-
 
-import os, time, threading, sys, subprocess, socket
+import os, time, threading, sys, subprocess, socket, signal
 from multiprocessing import Queue
 try:
   import psycopg2
@@ -13,6 +13,13 @@ except ModuleNotFoundError as err:
 
 exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
+
+#------------------------------------------------------------------------------------------------
+
+# Обработчик сигнала завершения приложения
+def signal_hundler(signal, frame):
+  global exit
+  exit = True
 
 #------------------------------------------------------------------------------------------------
 
@@ -90,13 +97,17 @@ def init_server():
 # Класс для работы с изменениями в nftables
 class setup_nftables(Thread):
   # Стартовые параметры
-  def  __init__(self, queue):
+  def  __init__(self, threads_list, todolist):
     super().__init__()
     self.daemon = True
-    self.queue = queue
+    self.threads_list = threads_list
+    self.todolist = todolist
+    global exit
 
   # Поток изменений в nftables
   def run(self):
+    # Добавление в очередь потока
+    self.threads_list.put('thread')
     # Запись в лог файл
     log_write('Thread setup_nftables running')
     try:
@@ -179,19 +190,25 @@ class setup_nftables(Thread):
     subprocess.call('nft flush ruleset', shell=True)
     # Запись в лог файл
     log_write('Thread setup_nftables stopped')
+    # Удаление потока из списка
+    self.threads_list.get()
 
 #------------------------------------------------------------------------------------------------
 
 # Класс для работы с трафиком в nftables
 class traffic_nftables(Thread):
   # Стартовые параметры
-  def  __init__(self, queue):
+  def  __init__(self, threads_list, todolist):
     super().__init__()
     self.daemon = True
-    self.queue = queue
+    self.threads_list = threads_list
+    self.todolist = todolist
+    global exit
 
   # Поток чтения трафика из nftables и обновления базы
   def run(self):
+    # Добавление в очередь потока
+    self.threads_list.put('thread')
     # Запись в лог файл
     log_write('Thread traffic_nftables running')
     try:
@@ -238,22 +255,28 @@ class traffic_nftables(Thread):
     conn_pg.close()
     # Запись в лог файл
     log_write('Thread traffic_nftables stopped')
+    # Удаление потока из списка
+    self.threads_list.get()
 
 #------------------------------------------------------------------------------------------------
 
 # Класс для работы с AD
 class track_events(Thread):
   # Стартовые параметры
-  def  __init__(self, queue):
+  def  __init__(self, threads_list, todolist):
     super().__init__()
     self.daemon = True
-    self.queue = queue
+    self.threads_list = threads_list
+    self.todolist = todolist
     self.ip_clients = [] # Список ip адресов клиентов
     self.ip_terminals = [] # Список ip адресов серверов терминалов
+    global exit
 
   # Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
   # Затем добавление новых записей в базу данных
   def run(self):
+    # Добавление в очередь потока
+    self.threads_list.put('thread')
     # Запись в лог файл
     log_write('Thread track_events running')
     # Подключение в серверу
@@ -291,8 +314,8 @@ class track_events(Thread):
           self.ip_clients.append(computer)
       #
       # Цикл добавления клиентов, полученных из очереди, в список
-      while not self.queue.empty():
-        ip_addr = self.queue.get() # IP адрес клиента
+      while not self.todolist.empty():
+        ip_addr = self.todolist.get() # IP адрес клиента
         # Проверка что ip адрес пустой или что он уже есть в списке
         if ip_addr is None or ip_addr in self.ip_clients:
           break
@@ -371,7 +394,7 @@ class track_events(Thread):
                 except psycopg2.DatabaseError as error:
                   log_write(error)
                   sys.exit(1)
-                log_write('Detect '+ip_addr+' is terminal server, block access')
+                log_write('Detect '+ip_addr+' is many users, block user access')
             #
             # Проверяем изменилось ли имя пользователя, имя компьютера или скорость, тогда меняем в базе
             # Обновлять если имя пользователя сменилось на другое имя (не *) и тип доступа ad
@@ -402,31 +425,43 @@ class track_events(Thread):
     conn_pg.close()
     # Запись в лог файл
     log_write('Thread track_events stopped')
+    # Удаление потока из списка
+    self.threads_list.get()
 
 #------------------------------------------------------------------------------------------------
 
 # Класс для работы с сетевыми пакетами
 class sniff_packets(Thread):
   # Стартовые параметры
-  def  __init__(self, queue):
+  def  __init__(self, threads_list, todolist):
     super().__init__()
     self.socket = None
     self.daemon = True
-    self.queue = queue
+    self.threads_list = threads_list
+    self.todolist = todolist
     self.ip_clients = []
     self.ip_local = get_ip_local()
+    global exit
 
   # Обработчик ip
-  def work_with_ip(self, queue):
+  def work_with_ip(self, todolist):
+    # Добавление в очередь потока
+    self.threads_list.put('thread')
+    # Запись в лог файл
+    log_write('Thread work_with_ip running')
     while not exit:
       # Очистка списка ip адресов
-      if self.queue.empty():
+      if self.todolist.empty():
         self.ip_clients.clear()
       # Ожидание потока
       for tick in range(5):
         time.sleep(1)
         if exit:
           break
+    # Запись в лог файл
+    log_write('Thread work_with_ip stopped')
+    # Удаление потока из списка
+    self.threads_list.get()
 
   # Обработчик каждого сетевого пакета
   def work_with_packet(self, packet):
@@ -441,12 +476,12 @@ class sniff_packets(Thread):
           # Добавляем ip адрес в список новых клиентов
           self.ip_clients.append(ip_addr)
           # Добавляем ip адрес в очередь
-          queue.put(ip_addr)
+          todolist.put(ip_addr)
 
   # Главный модуль выполнения потока
   def run(self):
     # Запуск потока обработки ip
-    threading.Thread(target=self.work_with_ip, args=(queue,)).start()
+    threading.Thread(target=self.work_with_ip, args=(todolist,)).start()
     # Запуск обработчика пакетов
     self.socket = conf.L2listen(type=ETH_P_ALL, filter="ip")
     sniff(opened_socket=self.socket, iface=get_config('LANInterface'), prn=self.work_with_packet, store=0)
@@ -455,21 +490,24 @@ class sniff_packets(Thread):
 
 # Запуск всех компонентов сервера
 if __name__ =='__main__':
+  # Настройка обработчика завершения приложения для системного SIGTERM и Ctrl+C (SIGINT)
+  signal.signal(signal.SIGTERM, signal_hundler)
+  signal.signal(signal.SIGINT, signal_hundler)
   # Начальная инициализация и проверка
   init_server()
-  # Создание очереди для потоков
-  queue = Queue()
+  # Создание очереди заданий для потоков
+  todolist = Queue()
+  # Создание очереди состояния работы потоков
+  threads_list = Queue()
   # Запуск потока обработки сетевых пакетов
-  sniff_packets(queue).start()
+  sniff_packets(threads_list,todolist).start()
   # Запуск потока чтения данных из AD
-  track_events(queue).start()
+  track_events(threads_list,todolist).start()
   # Запуск потока изменений в nftables
-  setup_nftables(queue).start()
+  setup_nftables(threads_list,todolist).start()
   # Запуск потока чтения трафика из nftables
-  traffic_nftables(queue).start()
-  try:
-    # Цикл работы потока сетевых пакетов
-    while True:
-      time.sleep(0.1)
-  except KeyboardInterrupt:
-    exit = True
+  traffic_nftables(threads_list,todolist).start()
+  #
+  # Главный цикл работы программы
+  while not threads_list.empty():
+    time.sleep(0.1)
