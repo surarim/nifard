@@ -11,15 +11,14 @@ except ModuleNotFoundError as err:
   print(err)
   sys.exit(1)
 
-exit = False # Завершение работы приложения
 config = [] # Список параметров файла конфигурации
 
 #------------------------------------------------------------------------------------------------
 
 # Обработчик сигнала завершения приложения
 def signal_hundler(signal, frame):
-  global exit
-  exit = True
+  # Инициализация завершения приложения
+  app_work.get()
 
 #------------------------------------------------------------------------------------------------
 
@@ -102,7 +101,6 @@ class setup_nftables(Thread):
     self.daemon = True
     self.threads_list = threads_list
     self.todolist = todolist
-    global exit
 
   # Поток изменений в nftables
   def run(self):
@@ -117,7 +115,7 @@ class setup_nftables(Thread):
       log_write(error)
       sys.exit(1)
     # Цикл чтения таблицы
-    while not exit:
+    while not app_work.empty():
       # Чтение из таблицы базы данных
       cursor = conn_pg.cursor()
       try:
@@ -132,7 +130,7 @@ class setup_nftables(Thread):
       rules_list = subprocess.check_output('nft list table nat', shell=True).decode().strip()
       for row in rows:
         # Повторная проверка на завершение потока
-        if exit:
+        if app_work.empty():
           break
         rule_nat = '' # Обнуление текущего правила для nat
         rule_traffic = '' # Обнуление текущего правила для traffic
@@ -184,7 +182,7 @@ class setup_nftables(Thread):
       # Ожидание потока
       for tick in range(5):
         time.sleep(1)
-        if exit:
+        if app_work.empty():
           break
     conn_pg.close()
     subprocess.call('nft flush ruleset', shell=True)
@@ -203,7 +201,6 @@ class traffic_nftables(Thread):
     self.daemon = True
     self.threads_list = threads_list
     self.todolist = todolist
-    global exit
 
   # Поток чтения трафика из nftables и обновления базы
   def run(self):
@@ -218,14 +215,14 @@ class traffic_nftables(Thread):
       log_write(error)
       sys.exit(1)
     # Цикл чтения nftables по показателю ip трафик
-    while not exit:
+    while not app_work.empty():
       if subprocess.call('nft list tables | grep traffic',stdout=subprocess.PIPE, shell=True) == 0:
         result = subprocess.check_output('nft list table traffic | grep "ip daddr" | cut -d" " -f3,8', shell=True).decode()
         for line in result.splitlines():
           # Выбор ip адреса только соответствующего маске ADUserIPMask
           if line.find(get_config('ADUserIPMask')) != -1:
             # Повторная проверка на завершение потока
-            if exit:
+            if app_work.empty():
               break
             # Поиск в базе выбранного ip адреса
             cursor = conn_pg.cursor()
@@ -250,7 +247,7 @@ class traffic_nftables(Thread):
       # Ожидание потока
       for tick in range(5):
         time.sleep(1)
-        if exit:
+        if app_work.empty():
           break
     conn_pg.close()
     # Запись в лог файл
@@ -270,7 +267,6 @@ class track_events(Thread):
     self.todolist = todolist
     self.ip_clients = [] # Список ip адресов клиентов
     self.ip_terminals = [] # Список ip адресов серверов терминалов
-    global exit
 
   # Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
   # Затем добавление новых записей в базу данных
@@ -287,7 +283,7 @@ class track_events(Thread):
     except psycopg2.DatabaseError as error:
       log_write(error)
       sys.exit(1)
-    while not exit:
+    while not app_work.empty():
       # Очистка списка новых клиентов
       self.ip_clients.clear()
       #
@@ -336,7 +332,7 @@ class track_events(Thread):
       # Цикл добавления новых клиентов в базу
       for pos in range(0,len(self.ip_clients),3):
           # Повторная проверка на завершение потока
-          if exit:
+          if app_work.empty():
             break
           ip_addr = self.ip_clients[pos] # IP адрес клиента
           username = self.ip_clients[pos+1] # Имя пользователя
@@ -420,7 +416,7 @@ class track_events(Thread):
       # Ожидание потока
       for tick in range(5):
         time.sleep(1)
-        if exit:
+        if app_work.empty():
           break
     conn_pg.close()
     # Запись в лог файл
@@ -441,7 +437,6 @@ class sniff_packets(Thread):
     self.todolist = todolist
     self.ip_clients = []
     self.ip_local = get_ip_local()
-    global exit
 
   # Обработчик ip
   def work_with_ip(self, todolist):
@@ -449,14 +444,14 @@ class sniff_packets(Thread):
     self.threads_list.put('thread')
     # Запись в лог файл
     log_write('Thread work_with_ip running')
-    while not exit:
+    while not app_work.empty():
       # Очистка списка ip адресов
       if self.todolist.empty():
         self.ip_clients.clear()
       # Ожидание потока
       for tick in range(5):
         time.sleep(1)
-        if exit:
+        if app_work.empty():
           break
     # Запись в лог файл
     log_write('Thread work_with_ip stopped')
@@ -499,6 +494,9 @@ if __name__ =='__main__':
   todolist = Queue()
   # Создание очереди состояния работы потоков
   threads_list = Queue()
+  # Создание очереди завершения приложения
+  app_work = Queue()
+  app_work.put('run')
   # Запуск потока обработки сетевых пакетов
   sniff_packets(threads_list,todolist).start()
   # Запуск потока чтения данных из AD
