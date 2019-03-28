@@ -340,6 +340,12 @@ class track_events(Thread):
         ip_addr = self.ip_clients[pos] # IP адрес клиента
         username = self.ip_clients[pos+1] # Имя пользователя
         computer = self.ip_clients[pos+2]  # Имя компьютера
+        # Проверка операционной системы компьютера
+        script = """([ADSISEARCHER]'cn="""+computer+"""').Findone().Properties.operatingsystem"""
+        osversion, streams, had_error = client.execute_ps(script)
+        # Если серверная операционная система, убираем доступ по пользователю
+        if osversion.lower().find('server') != -1:
+          username = '*'
         if username != '*':
           # Получение группы для текущего пользователя (фильтрация по internet)
           script = """([ADSISEARCHER]'samaccountname="""+username+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like 'internet_*'"""
@@ -378,8 +384,8 @@ class track_events(Thread):
         if rows and str(rows[0][4]) != 'no':
           # Если изменилось имя пользователя, имя компьютера или группа скорости
           if (str(rows[0][1]) != str(username) or str(rows[0][2]) != str(computer) or str(rows[0][3]) != str(speed)):
-            # Имя пользователя меняется на другое имя, не на *
-            if str(username) != '*':
+            # Имя пользователя меняется на другое имя, не на * и меняется группа скорости
+            if str(username) != '*' or (str(username) == '*' and str(rows[0][3]) != str(speed) and str(rows[0][1]) == str(username)):
               try:
                 cursor.execute("update users set username = %s, computer = %s, speed = %s where ip = %s;", (username, computer, speed, ip_addr,))
               except psycopg2.DatabaseError as error:
@@ -414,7 +420,7 @@ class track_events(Thread):
                 log_write(error)
                 sys.exit(1)
               # Запись в лог файл
-              log_write('Detect '+ip_addr+' is many users, block user access')
+              log_write('Detect '+ip_addr+' is many users, block ip address')
               #
           # Комит всех транзакций
           conn_pg.commit()
