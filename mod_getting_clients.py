@@ -215,27 +215,23 @@ class getting_clients(Thread):
           speed_user = speed_user.split()[0]
         except:
           speed_user = ''
-        speed_choice = ''
-        # Если серверная операционная система или неизвестная ОС, или linux, или пользователь администратор
-        if osversion.lower().find('server') != -1 or osversion.lower().find('unknown') != -1 or osversion.lower().find('linux') != -1 or user_group != 'user':
-          # Попытка доступа по компьютеру
+        speed = 'disable' # По умолчанию нет доступа
+        speed_choice = '' # По умолчанию нет выбора скорости
+        # Если пользователь администратор, доступ только по компьютеру
+        if user_group != 'user':
           if speed_computer != 'False' and speed_computer.find(get_config('ADGroupInternetMask')) != -1:
             speed = speed_computer
             speed_choice = '[computer]'
-          else:
-            # Попытка доступа по пользователю
-            if speed_user != 'False' and speed_user.find(get_config('ADGroupInternetMask')) != -1:
-              speed = speed_user
-              speed_choice = '[user]'
-            else:
-              speed = 'disable'
         else:
-          # Доступ по пользователю для всех остальных
+          # Если обычный пользователь, сначала доступ по учётной записи пользователя
           if speed_user != 'False' and speed_user.find(get_config('ADGroupInternetMask')) != -1:
             speed = speed_user
             speed_choice = '[user]'
           else:
-            speed = 'disable'
+            # Доступ по компьютеру для остальных
+            if speed_computer != 'False' and speed_computer.find(get_config('ADGroupInternetMask')) != -1:
+              speed = speed_computer
+              speed_choice = '[computer]'
         # Запись в лог файл
         log_write('Newest '+ip_addr+' '+username+' '+computer+'['+domain+']'+' '+speed+speed_choice+' ('+user_group+' '+osversion+')')
         if app_work.empty(): break # Повторная проверка на завершение потока
