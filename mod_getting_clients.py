@@ -53,7 +53,7 @@ class getting_clients(Thread):
           # Подключение к серверу
           client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
           # Получение журнала security по событию 4624, фильтрация по пользователям с полями: ip адрес, имя пользователя, домен
-          script = """Get-EventLog -LogName security -ComputerName """+get_config('ADServer')+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
+          script = """Get-EventLog -LogName security -ComputerName """+Server+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
           try:
             result, streams, had_error = client.execute_ps(script)
           except:
@@ -72,7 +72,7 @@ class getting_clients(Thread):
           # Получение параметров клиента
           ip_addr = line.split()[0] # IP адрес клиента
           username = line.split()[1] # Имя пользователя
-          domain = line.split()[2] # Домен
+          domain = line.split()[2].lower()+get_config('DomainRealm')[get_config('DomainRealm').find('.'):] # Домен, с корректировкой по конфигу
           try:
             computer = socket.gethostbyaddr(ip_addr)[0] # Имя компьютера
             computer = computer[0:computer.find('.')] if computer.find('.') != -1 else computer  # Имя компьютера без доменной части
@@ -288,21 +288,18 @@ class getting_clients(Thread):
               log_write('Detect '+ip_addr+' is many users, block ip address')
               #
           # Если изменилось имя пользователя, имя компьютера, имя домена или группа скорости
-          if (str(username_db) != str(username) or str(computer_db) != str(computer) or str(speed_db) != str(speed) or str(domain_db) != str(domain)):
-            # Имя пользователя меняется на другое имя, не на * и меняется группа скорости
-            if (str(username) != '*' or str(domain) != 'Domain Unknown') or ((str(username) == '*' or str(domain) == 'Domain Unknown') and str(speed_db) != str(speed) and str(username_db) == str(username)):
-              try:
-                cursor.execute("update users set username = %s, computer = %s, domain = %s, speed = %s where ip = %s;", (username, computer, domain, speed, ip_addr,))
-              except psycopg2.DatabaseError as error:
-                log_write(error)
-                sys.exit(1)
-              # Подготовка данных для лога
-              username = ' '+str(username_db)+'->'+str(username) if str(username_db) != str(username) else ' *'
-              computer = ' '+str(computer_db)+'->'+str(computer) if str(computer_db) != str(computer) else ''
-              speed = ' '+str(speed_db)+'->'+str(speed) if str(speed_db) != str(speed) else ''
-              domain = ' '+str(domain_db)+'->'+str(domain) if str(domain_db) != str(domain) else ''
-              # Запись в лог файл
-              log_write('Update '+ip_addr+username+computer+speed+domain)
+          # Имя пользователя меняется только на другое имя (не на '*'), или меняется группа скорости
+          if str(username) != str(username_db) and str(username) != '*': username_db = username
+          if str(computer) != str(computer_db) and str(computer) != '*': computer_db = computer
+          if str(speed) != str(speed_db): speed_db = speed
+          if str(domain) != str(domain_db) and str(domain) != 'Domain Unknown': domain_db = domain
+          try:
+            cursor.execute("update users set username = %s, computer = %s, domain = %s, speed = %s where ip = %s;", (username_db, computer_db, domain_db, speed_db, ip_addr_db,))
+            # Запись в лог файл
+            log_write('Update '+ip_addr_db+' '+username_db+' '+computer_db+' '+speed_db+' '+domain_db)
+          except psycopg2.DatabaseError as error:
+            log_write(error)
+            sys.exit(1)
           # Комит всех транзакций
           conn_pg.commit()
         # Закрытие курсора
