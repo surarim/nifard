@@ -1,15 +1,16 @@
+![Alt text](nifard.png?raw=true "Title")
 # nifard
-### Internet router with transparent access control from Active Directory
-### Version 0.68 (development)
+### Интернет маршрутизатор с прозрачным доступом
+### Version 0.70 (development)
 <hr>
-Internet access router for local ip addresses, with transparent verification of the user in Active Directory.
+Маршрутизатор предоставляет доступ в Интернет по ip адресам клиентов, с параллельной проверкой их типа доступа, скорости и т.д. через службу каталогов Active Directory. Предоставление доступа для ip адресов производится через правила nftables, а проверка параметров клиента происходит автоматически через модули pypsrp и scapy.
 <br>
-The nifard has been tested and assembled on the following components:
+Протестировано и собрано с использованием следующих компонентов:
 <ul>
-  <li>Python: 3.7.2</li>
-  <li>PostgreSQL: 11.2 </li>
+  <li>Python: 3.8.1</li>
+  <li>PostgreSQL: 12.1 </li>
   <li>nftables: 0.9.0</li>
-  <li>psycopg2: 2.7.7</li>
-  <li>pypsrp: 0.3.1 </li>
-  <li>scapy: 2.4.2 </li>
+  <li>psycopg2: 2.8.4</li>
+  <li>pypsrp: 0.4.0 </li>
+  <li>scapy: 2.4.3 </li>
  </ul>
