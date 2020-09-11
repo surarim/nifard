@@ -1,16 +1,16 @@
 ![Alt text](nifard.png?raw=true "Title")
 # nifard
 ### Интернет маршрутизатор с прозрачным доступом
-### Version 0.74 (development)
+### Version 0.75 (development)
 <hr>
 Маршрутизатор предоставляет доступ в Интернет по ip адресам клиентов, с параллельной проверкой их типа доступа, скорости и т.д., через службу каталогов Active Directory и мониторинг обращений. Предоставление доступа для ip адресов производится через правила nftables, а проверка параметров клиентов происходит автоматически через модули pypsrp и scapy.
 <br>
 Протестировано и собрано с использованием следующих компонентов:
 <ul>
-  <li>Python: 3.8.1</li>
-  <li>PostgreSQL: 12.1 </li>
-  <li>nftables: 0.9.0</li>
-  <li>psycopg2: 2.8.4</li>
-  <li>pypsrp: 0.4.0 </li>
-  <li>scapy: 2.4.3 </li>
+  <li>Python: 3.8.5</li>
+  <li>PostgreSQL: 12.4</li>
+  <li>nftables: 0.9.6</li>
+  <li>psycopg2: 2.8.6</li>
+  <li>pypsrp: 0.5.0</li>
+  <li>scapy: 2.4.4</li>
  </ul>

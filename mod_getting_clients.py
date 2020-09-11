@@ -53,7 +53,7 @@ class getting_clients(Thread):
           # Подключение к серверу
           client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
           # Получение журнала security по событию 4624, фильтрация по пользователям с полями: ip адрес, имя пользователя, домен
-          script = """Get-EventLog -LogName security -ComputerName """+Server+""" -Newest 500 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
+          script = """Get-EventLog -LogName security -ComputerName """+Server+""" -Newest 200 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
           try:
             result, streams, had_error = client.execute_ps(script)
           except:

@@ -51,14 +51,14 @@ class setup_nftables(Thread):
       conn_pg.commit()
       rows = cursor.fetchall()
       # Получение текущего списка правил nftables по таблице nat
-      rules_nat = subprocess.check_output('nft list table nat -a | head -n -2 | tail +4', shell=True).decode().strip()
+      rules_nat = subprocess.check_output('nft -a list table nat | head -n -2 | tail +4', shell=True).decode().strip()
       try:
         # Получение текущего списка правил nftables по таблице traffic
-        rules_traffic = subprocess.check_output('nft list table traffic -a | grep daddr', shell=True).decode().strip()
+        rules_traffic = subprocess.check_output('nft -a list table traffic | grep daddr', shell=True).decode().strip()
       except:
         rules_traffic = ''
       # Получение текущего списка правил nftables по таблице speed
-      rules_speed = subprocess.check_output('nft list table speed -a | head -n -2 | tail +4', shell=True).decode().strip()
+      rules_speed = subprocess.check_output('nft -a list table speed | head -n -2 | tail +4', shell=True).decode().strip()
       #
       for row in rows:
         if app_work.empty(): break # Повторная проверка на завершение потока
