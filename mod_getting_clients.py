@@ -53,7 +53,7 @@ class getting_clients(Thread):
           # Подключение к серверу
           client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
           # Получение журнала security по событию 4624, фильтрация по пользователям с полями: ip адрес, имя пользователя, домен
-          script = """Get-EventLog -LogName security -ComputerName """+Server+""" -Newest 100 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
+          script = """Get-EventLog -LogName security -ComputerName """+Server+""" -Newest 500 -InstanceId 4624 | Where-Object {($_.ReplacementStrings[5] -notlike '*$*') -and ($_.ReplacementStrings[5] -notlike '*/*') -and ($_.ReplacementStrings[5] -notlike '*АНОНИМ*') -and ($_.ReplacementStrings[18] -notlike '*-*')} | Select-Object @{Name="IpAddress";Expression={ $_.ReplacementStrings[18]}},@{Name="UserName";Expression={ $_.ReplacementStrings[5]}},@{Name="Domain";Expression={ $_.ReplacementStrings[6]}} -Unique"""
           try:
             result, streams, had_error = client.execute_ps(script)
           except:
@@ -268,10 +268,10 @@ class getting_clients(Thread):
         if rows and str(access_db) != 'no':
           # Если изменилось имя пользователя (* не учитывается), тогда запишем ip адрес в подозрение на терминальный сервер
           if str(username_db) != str(username) and str(username) != '*' and str(username_db) != '*':
-            if self.ip_terminals.count(ip_addr) < 2:
+            if self.ip_terminals.count(ip_addr) < 3:
               self.ip_terminals.append(ip_addr)
             # Это терминальный сервер
-            if self.ip_terminals.count(ip_addr) > 1:
+            if self.ip_terminals.count(ip_addr) > 2:
               # Удаляем все записи о данном сервере из листа повторений
               while self.ip_terminals.count(ip_addr) > 0:
                 try:
@@ -288,15 +288,25 @@ class getting_clients(Thread):
               log_write('Detect '+ip_addr+' is many users, block ip address')
               #
           # Если изменилось имя пользователя, имя компьютера, имя домена или группа скорости
-          # Имя пользователя меняется только на другое имя (не на '*'), или меняется группа скорости
-          if str(username) != str(username_db) and str(username) != '*': username_db = username
-          if str(computer) != str(computer_db) and str(computer) != '*': computer_db = computer
-          if str(speed) != str(speed_db): speed_db = speed
-          if str(domain) != str(domain_db) and str(domain) != 'Domain Unknown': domain_db = domain
+          # При этом имя пользователя, компьютера или домена, меняется только на другое имя (не на '*')
+          update_log = ''
+          if str(username) != str(username_db) and str(username) != '*':
+            update_log = update_log+' '+str(username_db)+'->'+ str(username)
+            username_db = username
+          if str(computer) != str(computer_db) and str(computer) != '*':
+            update_log = update_log+' '+str(computer_db)+'->'+ str(computer)
+            computer_db = computer
+          if str(domain) != str(domain_db) and str(domain) != 'Domain Unknown':
+            update_log = update_log+' '+str(domain_db)+'->'+ str(domain)
+            domain_db = domain
+          if str(speed) != str(speed_db) and speed_choice != '':
+            update_log = update_log+' '+str(speed_db)+'->'+ str(speed)
+            speed_db = speed
           try:
-            cursor.execute("update users set username = %s, computer = %s, domain = %s, speed = %s where ip = %s;", (username_db, computer_db, domain_db, speed_db, ip_addr_db,))
-            # Запись в лог файл
-            log_write('Update '+ip_addr_db+' '+username_db+' '+computer_db+' '+speed_db+' '+domain_db)
+            # Запись в лог файл, если что-то изменилось в базе
+            if update_log != '':
+              cursor.execute("update users set username = %s, computer = %s, domain = %s, speed = %s where ip = %s;", (username_db, computer_db, domain_db, speed_db, ip_addr,))
+              log_write('Update '+ip_addr+update_log)
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
