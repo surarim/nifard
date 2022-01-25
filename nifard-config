@@ -27,9 +27,6 @@ ADUserPassword = 123456
 # Маска ip адресов которым предоставляется доступ в Интернет
 ADUserIPMask = 192.168.
 
-# Имя группы администраторов домена
-ADGroupAdmins = Admins
-
 # Имя группы Active Directory для доступа в Интернет (маска)
 ADGroupInternetMask = internet_
 

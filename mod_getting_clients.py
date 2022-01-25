@@ -185,7 +185,7 @@ class getting_clients(Thread):
         # Если ip адреса нет в базе, добавляем
         if not rows:
           try:
-            cursor.execute("insert into users values (%s, %s, %s, %s, %s, 'ad', 0);", (ip_addr, username, computer, domain, speed_computer,))
+            cursor.execute("insert into users values (%s, %s, %s, %s, %s, 0);", (ip_addr, username, computer, domain, speed_computer,))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)

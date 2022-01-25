@@ -52,7 +52,7 @@ class traffic_nftables(Thread):
         if (str(datetime.now()).split(':')[0]).split()[1] == "01":
           nft_counters_reset = False
         # Получение данных по трафику для всех ip
-        result = subprocess.check_output('nft list counters | head -n -2 | tail +4 | tr "{\n" " " | sed "s/}/\\n/g" | cut -d" " -f3,9', shell=True).decode()
+        result = subprocess.check_output('nft list counters | head -n -2 | tail +2 | xargs | tr "{" " " | sed "s/} /\\n/g" | cut -d" " -f2,8', shell=True).decode()
         for line in result.splitlines():
           # Выбор ip адреса только соответствующего маске ADUserIPMask
           if line.find(get_config('ADUserIPMask')) != -1:
