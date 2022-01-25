@@ -117,7 +117,7 @@ class getting_clients(Thread):
         computer = self.ip_clients[pos+2]  # Имя компьютера
         domain = self.ip_clients[pos+3]  # Имя домена
         osversion = ''
-        speed_computer = 'disable'
+        speed_computer = get_config('ADGroupInternetMask')+'disable'
       #
         # Проверка операционной системы компьютера
         while not app_work.empty():
@@ -158,9 +158,9 @@ class getting_clients(Thread):
         try:
           # Установка результирующей группы скорости
           speed_computer = speed.split()[0]
-          if speed_computer == 'False': speed_computer = 'disable'
+          if speed_computer == 'False': speed_computer = get_config('ADGroupInternetMask')+'disable'
         except:
-          speed_computer = 'disable'
+          speed_computer = get_config('ADGroupInternetMask')+'disable'
         #
         # Запись в лог файл
         log_write('Newest '+ip_addr+' '+username+' '+computer+'['+domain+']'+' speed['+speed_computer+'] ('+osversion+')')
