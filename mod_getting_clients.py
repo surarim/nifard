@@ -29,7 +29,6 @@ class getting_clients(Thread):
     self.threads_list = threads_list
     self.todolist = todolist
     self.ip_clients = [] # Список ip адресов клиентов
-    self.ip_terminals = [] # Список ip адресов серверов терминалов
     self.error = False # Ошибка вызова обработчика
 
   # Поток чтения журнала security и сетевых пакетов, для получения связки: ip, пользователь, имя пк
@@ -118,6 +117,7 @@ class getting_clients(Thread):
         computer = self.ip_clients[pos+2]  # Имя компьютера
         domain = self.ip_clients[pos+3]  # Имя домена
         osversion = ''
+        speed_computer = 'disable'
       #
         # Проверка операционной системы компьютера
         while not app_work.empty():
@@ -140,100 +140,30 @@ class getting_clients(Thread):
             break
         if not osversion:
           osversion = 'OS Unknown'
-        user_group = ''
-      #
-        # Проверка пользователя на принадлежность к группе администраторов
-        while not app_work.empty():
-          for Server in get_config('ADServer').split():
-            self.error = False
-            # Подключение к серверу
-            client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
-            # Проверка пользователя на принадлежность к группе администраторов
-            script = """([ADSISEARCHER]'samaccountname="""+username+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like '"""+get_config('ADGroupAdmins')+"""'"""
-            try:
-              user_group, streams, had_error = client.execute_ps(script)
-            except:
-              log_write('[ADSISEARCHER] Memberof(Admins) powershell error')
-              self.error = True
-              if app_work.empty(): break # Повторная проверка на завершение потока
-              time.sleep(5)
-            if not self.error:
-              break
-          if not self.error:
-            break
-        if not user_group or user_group == 'False':
-          user_group = 'user'
-        speed_computer = ''
-      #
+        #
         # Получение скорости для текущего компьютера
-        while not app_work.empty():
-          for Server in get_config('ADServer').split():
-            self.error = False
-            # Подключение к серверу
-            client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
-            # Получение скорости для текущего компьютера в верхнем регистре (фильтрация по группе доступа в Интернет)
-            script = """([ADSISEARCHER]'cn="""+computer+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like '"""+get_config('ADGroupInternetMask')+"""*'"""
-            try:
-              speed_computer, streams, had_error = client.execute_ps(script)
-            except:
-              log_write('[ADSISEARCHER] Memberof(Computer Internet) powershell error')
-              self.error = True
-              if app_work.empty(): break # Повторная проверка на завершение потока
-              time.sleep(5)
-            if not self.error:
-              break
-          if not self.error:
-            break
+        for Server in get_config('ADServer').split():
+          self.error = False
+          time.sleep(5)
+          # Подключение к серверу
+          client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
+          # Получение скорости для текущего компьютера в верхнем регистре (фильтрация по группе доступа в Интернет)
+          script = """([ADSISEARCHER]'cn="""+computer+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like '"""+get_config('ADGroupInternetMask')+"""*'"""
+          try:
+            speed, streams, had_error = client.execute_ps(script)
+          except:
+            log_write('[ADSISEARCHER] Memberof(Computer Internet) powershell error')
+            self.error = True
+          if self.error or app_work.empty(): break
         try:
-          # Получение только первой группы
-          speed_computer = speed_computer.split()[0]
+          # Установка результирующей группы скорости
+          speed_computer = speed.split()[0]
+          if speed_computer == 'False': speed_computer = 'disable'
         except:
-          speed_computer = ''
-        speed_user = ''
-      #
-        # Получение скорости для текущего пользователя
-        while not app_work.empty():
-          for Server in get_config('ADServer').split():
-            self.error = False
-            # Подключение к серверу
-            client = Client(Server+"."+get_config('DomainRealm'), auth="kerberos", ssl=False, username=get_config('ADUserName'), password=get_config('ADUserPassword'))
-            # Получение скорости для текущего пользователя (фильтрация по группе доступа в Интернет)
-            script = """([ADSISEARCHER]'samaccountname="""+username+"""').Findone().Properties.memberof -replace '^CN=([^,]+).+$','$1' -like '"""+get_config('ADGroupInternetMask')+"""*'"""
-            try:
-              speed_user, streams, had_error = client.execute_ps(script)
-            except:
-              log_write('[ADSISEARCHER] Memberof(User Internet) powershell error')
-              self.error = True
-              if app_work.empty(): break # Повторная проверка на завершение потока
-              time.sleep(5)
-            if not self.error:
-              break
-          if not self.error:
-            break
-        try:
-          # Получение только первой группы
-          speed_user = speed_user.split()[0]
-        except:
-          speed_user = ''
-        speed = 'disable' # По умолчанию нет доступа
-        speed_choice = '' # По умолчанию нет выбора скорости
-        # Если пользователь администратор, доступ только по компьютеру
-        if user_group != 'user':
-          if speed_computer != 'False' and speed_computer.find(get_config('ADGroupInternetMask')) != -1:
-            speed = speed_computer
-            speed_choice = '[computer]'
-        else:
-          # Если обычный пользователь, сначала доступ по учётной записи пользователя
-          if speed_user != 'False' and speed_user.find(get_config('ADGroupInternetMask')) != -1:
-            speed = speed_user
-            speed_choice = '[user]'
-          else:
-            # Доступ по компьютеру для остальных
-            if speed_computer != 'False' and speed_computer.find(get_config('ADGroupInternetMask')) != -1:
-              speed = speed_computer
-              speed_choice = '[computer]'
+          speed_computer = 'disable'
+        #
         # Запись в лог файл
-        log_write('Newest '+ip_addr+' '+username+' '+computer+'['+domain+']'+' '+speed+speed_choice+' ('+user_group+' '+osversion+')')
+        log_write('Newest '+ip_addr+' '+username+' '+computer+'['+domain+']'+' speed['+speed_computer+'] ('+osversion+')')
         if app_work.empty(): break # Повторная проверка на завершение потока
         #
         # Поиск в базе выбранного ip адреса
@@ -250,43 +180,20 @@ class getting_clients(Thread):
           computer_db = row[2] # Имя компьютера из базы
           domain_db = row[3] # Имя домена из базы
           speed_db = row[4] # Группа скорости из базы
-          access_db = row[5] # Тип доступа из базы
           break
         #
         # Если ip адреса нет в базе, добавляем
         if not rows:
           try:
-            cursor.execute("insert into users values (%s, %s, %s, %s, %s, 'ad', 0);", (ip_addr, username, computer, domain, speed,))
+            cursor.execute("insert into users values (%s, %s, %s, %s, %s, 'ad', 0);", (ip_addr, username, computer, domain, speed_computer,))
           except psycopg2.DatabaseError as error:
             log_write(error)
             sys.exit(1)
           # Запись в лог файл
-          log_write('Insert '+ip_addr+' '+username+' '+computer+' '+speed)
+          log_write('Insert '+ip_addr+' '+username+' '+computer+' '+speed_computer)
           conn_pg.commit()
         #
-        # Если ip адрес есть, и тип доступа не 'disable'
-        if rows and str(access_db) != 'no':
-          # Если изменилось имя пользователя (* не учитывается), тогда запишем ip адрес в подозрение на терминальный сервер
-          if str(username_db) != str(username) and str(username) != '*' and str(username_db) != '*':
-            if self.ip_terminals.count(ip_addr) < 3:
-              self.ip_terminals.append(ip_addr)
-            # Это терминальный сервер
-            if self.ip_terminals.count(ip_addr) > 2:
-              # Удаляем все записи о данном сервере из листа повторений
-              while self.ip_terminals.count(ip_addr) > 0:
-                try:
-                  self.ip_terminals.remove(ip_addr)
-                except:
-                  pass
-              try:
-                # Запрещаем доступ с терминального сервера
-                cursor.execute("update users set access = 'no' where ip = %s;", ( ip_addr,))
-              except psycopg2.DatabaseError as error:
-                log_write(error)
-                sys.exit(1)
-              # Запись в лог файл
-              log_write('Detect '+ip_addr+' is many users, block ip address')
-              #
+        if rows:
           # Если изменилось имя пользователя, имя компьютера, имя домена или группа скорости
           # При этом имя пользователя, компьютера или домена, меняется только на другое имя (не на '*')
           update_log = ''
@@ -299,9 +206,9 @@ class getting_clients(Thread):
           if str(domain) != str(domain_db) and str(domain) != 'Domain Unknown':
             update_log = update_log+' '+str(domain_db)+'->'+ str(domain)
             domain_db = domain
-          if str(speed) != str(speed_db) and speed_choice != '':
-            update_log = update_log+' '+str(speed_db)+'->'+ str(speed)
-            speed_db = speed
+          if str(speed_computer) != str(speed_db):
+            update_log = update_log+' '+str(speed_db)+'->'+ str(speed_computer)
+            speed_db = speed_computer
           try:
             # Запись в лог файл, если что-то изменилось в базе
             if update_log != '':

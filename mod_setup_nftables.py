@@ -67,7 +67,6 @@ class setup_nftables(Thread):
         computer = row[2] # Имя компьютера
         domain = row[3] # Имя домена
         speed = row[4] # Группа скорости
-        access = row[5] # Тип доступа
         # Проверка ip адреса на валидность
         if ip_addr.count('.') == 3 and ip_addr.find(get_config('ADUserIPMask')) != -1:
           # Обнуление переменных модификаций правил
@@ -132,7 +131,7 @@ class setup_nftables(Thread):
               log_write('Delete '+ip_addr+' from nftables')
           #
           # Добавление правил
-          if access.find('always') != -1 or (access != 'no' and speed != 'disable' and speed.find('disable') == -1):
+          if (speed != 'disable' and speed.find('disable') == -1):
             # Если ip адреса ещё нет в nftables, и при этом он не принадлежит другому домену, то добавляем
             if ' '+ip_addr+' ' not in rules_nat and (domain == get_config('DomainRealm') or domain == 'Domain Unknown'):
               # Формирование правила в nat
